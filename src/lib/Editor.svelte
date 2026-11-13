@@ -6,7 +6,7 @@
   import { open } from '@tauri-apps/plugin-dialog'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
-    Table, Image, BetweenHorizontalEnd, BetweenVerticalEnd, Trash2,
+    Table, Image, BetweenHorizontalStart, BetweenHorizontalEnd, BetweenVerticalStart, BetweenVerticalEnd, Trash2,
   } from '@lucide/svelte'
   import { extensions, split, media } from './schema'
   import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists } from './store.svelte'
@@ -111,10 +111,32 @@
   ]
   // only while the caret is in a table
   const tableTools: Tool[] = [
-    { key: 'row', label: 'Ajouter une ligne', icon: BetweenHorizontalEnd, run: () => cmd().addRowAfter().run(), active: () => false },
-    { key: 'col', label: 'Ajouter une colonne', icon: BetweenVerticalEnd, run: () => cmd().addColumnAfter().run(), active: () => false },
     { key: 'deltable', label: 'Supprimer le tableau', icon: Trash2, run: () => cmd().deleteTable().run(), active: () => false },
   ]
+  // in-table handles: sit on the table's top edge above the current column, and on its left edge beside the current row
+  type Handle = { label: string; icon: typeof Bold; run: () => unknown; danger?: boolean }
+  const colTools: Handle[] = [
+    { label: 'Insérer une colonne à gauche', icon: BetweenVerticalStart, run: () => cmd().addColumnBefore().run() },
+    { label: 'Supprimer la colonne', icon: Trash2, run: () => cmd().deleteColumn().run(), danger: true },
+    { label: 'Insérer une colonne à droite', icon: BetweenVerticalEnd, run: () => cmd().addColumnAfter().run() },
+  ]
+  const rowTools: Handle[] = [
+    { label: 'Insérer une ligne au-dessus', icon: BetweenHorizontalStart, run: () => cmd().addRowBefore().run() },
+    { label: 'Supprimer la ligne', icon: Trash2, run: () => cmd().deleteRow().run(), danger: true },
+    { label: 'Insérer une ligne en dessous', icon: BetweenHorizontalEnd, run: () => cmd().addRowAfter().run() },
+  ]
+  let grid = $state<{ cx: number; top: number; left: number; cy: number } | null>(null)
+
+  function placeGrid() {
+    const e = editor
+    if (!e || !e.isFocused || !e.isActive('table')) return void (grid = null)
+    const { node } = e.view.domAtPos(e.state.selection.from)
+    const cell = (node instanceof HTMLElement ? node : node.parentElement)?.closest('td, th')
+    const table = cell?.closest('table')
+    if (!cell || !table) return void (grid = null)
+    const p = page.getBoundingClientRect(), c = cell.getBoundingClientRect(), t = table.getBoundingClientRect()
+    grid = { cx: c.left - p.left + c.width / 2, top: t.top - p.top, left: t.left - p.left, cy: c.top - p.top + c.height / 2 }
+  }
 
   // vault-relative path of `to`, written relative to the note's folder `dir`
   function relTo(dir: string, to: string) {
@@ -189,9 +211,10 @@
         if (a.join() !== on.join()) on = a
         place()
         moveCaret()
+        placeGrid()
       },
-      onFocus: () => (place(), moveCaret()),
-      onBlur: () => (place(), moveCaret()),
+      onFocus: () => (place(), moveCaret(), placeGrid()),
+      onBlur: () => (place(), moveCaret(), placeGrid()),
       onUpdate: ({ editor: e }) => {
         words = count(e.getText())
         status = 'saving'
@@ -256,7 +279,7 @@
     host.addEventListener('pointerdown', down)
     window.addEventListener('pointerup', up)
     // reflow (window resize, images loading) moves text under a still caret
-    const ro = new ResizeObserver(() => moveCaret())
+    const ro = new ResizeObserver(() => (moveCaret(), placeGrid()))
     ro.observe(host)
     const un = onDiskChange(async (paths) => {
       if (!path || !editor || !paths.includes(path)) return
@@ -298,6 +321,15 @@
   {/if}
 {/snippet}
 
+{#snippet handles(list: Handle[], cls: string, x: number, y: number)}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="cellbar {cls}" role="toolbar" tabindex="-1" style:left="{x}px" style:top="{y}px" onmousedown={(e) => e.preventDefault()}>
+    {#each list as h}
+      <button class="icon-btn" class:danger={h.danger} title={h.label} aria-label={h.label} onclick={() => h.run()}><h.icon size={13} strokeWidth={1.7} /></button>
+    {/each}
+  </div>
+{/snippet}
+
 <section class="editor" class:empty={!app.current} bind:this={section}>
   {#if app.current}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -327,6 +359,10 @@
     <div bind:this={host}></div>
     {#if caret}
       <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px"></div>
+    {/if}
+    {#if grid}
+      {@render handles(colTools, 'col', grid.cx, grid.top)}
+      {@render handles(rowTools, 'row', grid.left, grid.cy)}
     {/if}
     </div>
   </div>
@@ -387,6 +423,25 @@
   .title:focus-visible { outline: none; }
 
   .page { position: relative; max-width: 700px; margin: 0 auto; }
+
+  .cellbar {
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    gap: 1px;
+    padding: 2px;
+    background: var(--surface-solid);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    box-shadow: 0 6px 18px -10px #00000066;
+    animation: cellbar 120ms var(--ease);
+  }
+  /* just outside the table, never over its cells: above it (tables get room for this) and in the page's left margin */
+  .cellbar.col { transform: translate(-50%, calc(-100% - 3px)); }
+  .cellbar.row { flex-direction: column; transform: translate(calc(-100% - 3px), -50%); }
+  .cellbar .icon-btn { width: 22px; height: 22px; color: var(--muted); }
+  .cellbar .icon-btn.danger:hover { color: var(--orange); }
+  @keyframes cellbar { from { opacity: 0; } }
 
   .caret {
     position: absolute;
@@ -563,5 +618,5 @@
   :global(.tiptap th) { font-weight: 650; text-align: left; background: var(--surface); }
   :global(.tiptap :is(td, th) p) { margin: 0; }
   :global(.tiptap .selectedCell) { background: var(--select); }
-  :global(.tiptap .tableWrapper) { overflow-x: auto; }
+  :global(.tiptap .tableWrapper) { overflow-x: auto; margin-top: 30px; }
 </style>
