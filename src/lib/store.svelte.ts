@@ -1,6 +1,7 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, type InvokeArgs, type InvokeOptions } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { SvelteSet } from 'svelte/reactivity'
+import { toast } from 'svelte-sonner'
 
 export type Node = { name: string; path: string; dir: boolean; children: Node[] }
 
@@ -22,7 +23,6 @@ export const app = $state({
   sidebarW: Number(ls.get('sidebarW') ?? 248),
   agent: ls.get('agentOpen') === '1',
   palette: null as null | 'files' | 'commands',
-  error: null as string | null,
   git: null as null | { changes: number; remote: boolean },
   syncing: false,
 })
@@ -30,18 +30,13 @@ export const app = $state({
 // set by the editor so file moves never race a pending autosave
 export const hooks = { flush: async () => {} }
 
-export const call = <T>(cmd: string, args?: Record<string, unknown>) =>
-  invoke<T>(cmd, args).catch((e) => {
+export const call = <T>(cmd: string, args?: InvokeArgs, options?: InvokeOptions) =>
+  invoke<T>(cmd, args, options).catch((e) => {
     flash(String(e))
     throw e
   })
 
-let errTimer = 0
-export function flash(msg: string) {
-  app.error = msg
-  clearTimeout(errTimer)
-  errTimer = window.setTimeout(() => (app.error = null), 4000)
-}
+export const flash = (msg: string) => toast.error(msg)
 
 export function persist() {
   if (app.vault) ls.set('vault', app.vault)

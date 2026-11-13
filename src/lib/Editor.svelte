@@ -2,13 +2,17 @@
   import { onMount } from 'svelte'
   import { Editor, Extension, type ChainedCommands } from '@tiptap/core'
   import { Markdown } from '@tiptap/markdown'
+  import { BubbleMenu } from '@tiptap/extension-bubble-menu'
+  import { FileHandler } from '@tiptap/extension-file-handler'
+  import { DropdownMenu } from 'bits-ui'
   import { convertFileSrc } from '@tauri-apps/api/core'
   import { open } from '@tauri-apps/plugin-dialog'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
-    Table, Image, BetweenHorizontalStart, BetweenHorizontalEnd, BetweenVerticalStart, BetweenVerticalEnd, Trash2, GripVertical, GripHorizontal, Plus,
+    Table, Image, BetweenHorizontalStart, BetweenHorizontalEnd, BetweenVerticalStart, BetweenVerticalEnd, Trash2, Grid2x2X, GripVertical, GripHorizontal, Plus,
   } from '@lucide/svelte'
   import { extensions, split, media } from './schema'
+  import Tip from './Tip.svelte'
   import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists } from './store.svelte'
 
   let host: HTMLDivElement
@@ -22,7 +26,6 @@
   let words = $state(0)
   let status = $state<'saved' | 'saving'>('saved')
   let ember = $state(0)
-  let section: HTMLElement
   let page: HTMLElement
   let caretEl = $state<HTMLElement>()
   let caret = $state<{ x: number; y: number; h: number } | null>(null)
@@ -109,10 +112,6 @@
     { key: 'table', label: 'Tableau', icon: Table, run: () => cmd().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: is('table') },
     { key: 'image', label: 'Image', icon: Image, run: () => image(), active: is('image') },
   ]
-  // only while the caret is in a table
-  const tableTools: Tool[] = [
-    { key: 'deltable', label: 'Supprimer le tableau', icon: Trash2, run: () => cmd().deleteTable().run(), active: () => false },
-  ]
   // Notion-style table controls, shown on hover only: a grip beside the hovered row / above the hovered
   // column opens a small menu, and thin "+" strips under / right of the table add a row / column at the end
   type Hover = { cell: HTMLElement; table: HTMLTableElement; tx: number; ty: number; tw: number; th: number; ry: number; rh: number; cx: number; cw: number }
@@ -153,6 +152,12 @@
     { label: 'Insérer à droite', icon: BetweenVerticalEnd, run: (c) => c.addColumnAfter() },
     { label: 'Supprimer la colonne', icon: Trash2, run: (c) => c.deleteColumn(), danger: true },
   ]
+  // only while the caret is in a table: the same actions, reachable from the keyboard (the grips are mouse-only)
+  const tableTools: Item[] = [...rowMenu, ...colMenu, { label: 'Supprimer le tableau', icon: Grid2x2X, run: (c) => c.deleteTable(), danger: true }]
+  function openMenu(k: 'row' | 'col', o: boolean) {
+    menu = o ? k : null
+    if (!o) leave()
+  }
 
   // vault-relative path of `to`, written relative to the note's folder `dir`
   function relTo(dir: string, to: string) {
@@ -162,14 +167,58 @@
     return [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/')
   }
 
-  /** Pick an image; one from outside the vault is copied next to the note first. */
-  async function image() {
-    const file = await open({ filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'] }] })
-    if (typeof file !== 'string' || !path || !app.vault) return
-    const dir = parent(path)
-    const rel = file.startsWith(app.vault + '/') ? file.slice(app.vault.length + 1) : await call<string>('import_file', { src: file, dir })
-    cmd().setImage({ src: encodeURI(relTo(dir, rel)), alt: rel.split('/').pop()!.replace(/\.\w+$/, '') }).run()
+  const IMAGES = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif']
+  /** Embed vault files `rels` in `note` (if still the open one), at `pos` or the caret. */
+  function embed(note: string, rels: string[], pos?: number) {
+    if (note !== path || !rels.length) return // the user moved to another note meanwhile
+    const dir = parent(note)
+    const nodes = rels.map((rel) => ({ type: 'image', attrs: { src: encodeURI(relTo(dir, rel)), alt: rel.split('/').pop()!.replace(/\.\w+$/, '') } }))
+    ;(pos == null ? cmd().insertContent(nodes) : cmd().insertContentAt(pos, nodes)).run()
   }
+
+  /** Embed image files from disk: one already in the vault is linked, one from outside is copied next to the note first. */
+  async function embedPaths(files: string[], pos?: number) {
+    const note = path
+    if (!note || !app.vault) return
+    const rels: string[] = []
+    for (const f of files)
+      rels.push(f.startsWith(app.vault + '/') ? f.slice(app.vault.length + 1) : await call<string>('import_file', { src: f, dir: parent(note) }))
+    embed(note, rels, pos)
+  }
+
+  async function image() {
+    const file = await open({ filters: [{ name: 'Images', extensions: IMAGES }] })
+    if (typeof file === 'string') embedPaths([file])
+  }
+
+  /** WebKitGTK hands over files copied or dragged from the file manager as file:// URIs, not as files. */
+  function imagePaths(dt: DataTransfer | null) {
+    const uris = (dt?.getData('text/uri-list') || dt?.getData('text/plain') || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+    if (!uris.length || !uris.every((u) => u.startsWith('file://'))) return []
+    return uris.map((u) => decodeURIComponent(new URL(u).pathname)).filter((p) => IMAGES.includes(p.split('.').pop()!.toLowerCase()))
+  }
+
+  /** Pasted or dropped images: written next to the note, then embedded where they landed. */
+  async function drop(files: File[], pos?: number) {
+    const note = path
+    if (!note) return
+    const dir = parent(note)
+    const rels: string[] = []
+    for (const f of files) {
+      // a pasted screenshot has no real name
+      const name = f.name && f.name !== 'image.png' ? f.name : `image-${new Date().toISOString().slice(0, 19).replace(/\D/g, '')}.${f.type.split('/')[1]?.replace('svg+xml', 'svg') ?? 'png'}`
+      rels.push(await call<string>('save_file', new Uint8Array(await f.arrayBuffer()), {
+        headers: { 'x-dir': encodeURIComponent(dir), 'x-name': encodeURIComponent(name) },
+      }))
+    }
+    embed(note, rels, pos)
+  }
+  const files = FileHandler.configure({
+    allowedMimeTypes: IMAGES.map((e) => `image/${{ jpg: 'jpeg', svg: 'svg+xml' }[e] ?? e}`),
+    onPaste: (_e, f) => void drop(f),
+    onDrop: (_e, f, pos) => void drop(f, pos),
+    consumePasteEvent: true,
+  })
 
   // Word-style caret: our own bar that glides to its new spot (the native one jumps), blinking softly
   function moveCaret() {
@@ -181,22 +230,19 @@
     // transition, and rewinding that one snapped the caret back to where it came from
     caretEl?.getAnimations().forEach((a) => { if (!(a instanceof CSSTransition)) a.currentTime = 0 })
   }
-  let bar = $state<{ x: number; y: number } | null>(null)
+  let barEl: HTMLDivElement
   let on = $state<string[]>([])
   let dragging = false
-
-  function place() {
-    const sel = editor?.state.selection
-    if (!editor || !sel || sel.empty || dragging || !editor.isFocused) return void (bar = null)
-    const a = editor.view.coordsAtPos(sel.from), b = editor.view.coordsAtPos(sel.to)
-    const box = section.getBoundingClientRect()
-    const x = a.top === b.top ? (a.left + b.right) / 2 : a.left
-    const above = a.top - box.top - 46
-    bar = {
-      x: Math.max(200, Math.min(box.width - 200, x - box.left)),
-      y: above > 8 ? above : b.bottom - box.top + 10,
-    }
-  }
+  // selection toolbar: Tiptap's bubble menu, placed by floating-ui (flips below / shifts sideways to stay in view)
+  const bubble = () =>
+    BubbleMenu.configure({
+      element: barEl,
+      // inside the scrolled page, so it scrolls with the text natively instead of chasing it from scroll events
+      appendTo: () => page,
+      shouldShow: ({ editor: e, state }) =>
+        !dragging && e.isEditable && !state.selection.empty && (e.view.hasFocus() || barEl.contains(document.activeElement)),
+      options: { strategy: 'absolute', placement: 'top', offset: 8, flip: { padding: 8 }, shift: { padding: 8 }, hide: true, scrollTarget: scroller },
+    })
 
   // the editor always keeps an empty paragraph at the end: don't write it out as trailing blank lines
   const text = () => front + editor!.getMarkdown().replace(/\s*$/, '\n').replace(/^\n$/, '')
@@ -219,17 +265,31 @@
     editor?.destroy()
     editor = new Editor({
       element: host,
-      extensions: [...extensions, Markdown, keys],
+      extensions: [...extensions, Markdown, keys, bubble(), files],
       content: body,
       contentType: 'markdown',
+      // these run before plugins, so file:// images are taken here and real files fall through to FileHandler
+      editorProps: {
+        handlePaste: (_v, e) => {
+          const p = imagePaths(e.clipboardData)
+          if (p.length) embedPaths(p)
+          return p.length > 0
+        },
+        handleDrop: (v, e) => {
+          const p = imagePaths(e.dataTransfer)
+          if (!p.length) return false
+          e.preventDefault()
+          embedPaths(p, v.posAtCoords({ left: e.clientX, top: e.clientY })?.pos)
+          return true
+        },
+      },
       onTransaction: () => {
         const a = tools.filter((t) => t?.active()).map((t) => t!.key)
         if (a.join() !== on.join()) on = a
-        place()
         moveCaret()
       },
-      onFocus: () => (place(), moveCaret()),
-      onBlur: () => (place(), moveCaret()),
+      onFocus: moveCaret,
+      onBlur: moveCaret,
       onUpdate: ({ editor: e }) => {
         words = count(e.getText())
         status = 'saving'
@@ -289,19 +349,19 @@
 
   onMount(() => {
     // no toolbar while the mouse is still dragging out a selection
-    const down = () => { dragging = true; bar = null }
-    const up = () => { if (dragging) { dragging = false; requestAnimationFrame(place) } }
+    const down = () => { dragging = true }
+    const up = () => {
+      if (!dragging) return
+      dragging = false
+      // next frame: ProseMirror settles a click on mouseup, after pointerup; dispatching before that cancels the click
+      requestAnimationFrame(() => {
+        if (editor && !editor.state.selection.empty) editor.view.dispatch(editor.state.tr.setMeta('bubbleMenu', 'show'))
+      })
+    }
     host.addEventListener('pointerdown', down)
     window.addEventListener('pointerup', up)
     host.addEventListener('mousemove', track)
     host.addEventListener('mouseleave', leave)
-    // a table menu closes on any click outside it, or Escape
-    const close = (e: Event) => {
-      if (menu && !(e.target as HTMLElement).closest?.('.tmenu, .grip')) { menu = null; leave() }
-    }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && menu) { menu = null; leave() } }
-    window.addEventListener('pointerdown', close)
-    window.addEventListener('keydown', esc)
     // reflow (window resize, images loading) moves text under a still caret
     const ro = new ResizeObserver(() => moveCaret())
     ro.observe(host)
@@ -321,8 +381,6 @@
     })
     return () => {
       window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointerdown', close)
-      window.removeEventListener('keydown', esc)
       ro.disconnect()
       save()
       un.then((f) => f())
@@ -331,34 +389,49 @@
   })
 </script>
 
-{#snippet buttons()}
+{#snippet buttons(table: boolean)}
   {#each tools as t}
     {#if t}
-      <button class="icon-btn" class:on={on.includes(t.key)} aria-pressed={on.includes(t.key)} title={t.label} aria-label={t.label} onclick={() => t.run()}><t.icon size={15} strokeWidth={1.6} /></button>
+      <Tip class={on.includes(t.key) ? 'icon-btn on' : 'icon-btn'} aria-pressed={on.includes(t.key)} label={t.label} onclick={() => t.run()}><t.icon size={15} strokeWidth={1.6} /></Tip>
     {:else}
       <span class="sep"></span>
     {/if}
   {/each}
-  {#if on.includes('table')}
+  {#if table && on.includes('table')}
     <span class="sep"></span>
     {#each tableTools as t}
-      <button class="icon-btn" title={t.label} aria-label={t.label} onclick={() => t.run()}><t.icon size={15} strokeWidth={1.6} /></button>
+      <Tip class="icon-btn" label={t.label} onclick={() => t.run(cmd()).run()}><t.icon size={15} strokeWidth={1.6} /></Tip>
     {/each}
   {/if}
 {/snippet}
 
+{#snippet tableMenu(k: 'row' | 'col', h: Hover, style: string)}
+  <DropdownMenu.Root bind:open={() => menu === k, (o) => openMenu(k, o)}>
+    <DropdownMenu.Trigger class={menu === k ? `grip ${k} open` : `grip ${k}`} aria-label={k === 'row' ? 'Options de la ligne' : 'Options de la colonne'} {style}>
+      {#if k === 'row'}<GripVertical size={12} />{:else}<GripHorizontal size={12} />{/if}
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Portal>
+      <DropdownMenu.Content class="menu" side={k === 'row' ? 'left' : 'bottom'} align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={(e) => e.preventDefault()}>
+        {#each k === 'row' ? rowMenu : colMenu as it}
+          <DropdownMenu.Item class={it.danger ? 'danger' : ''} onSelect={() => at(h.cell, it.run)}><it.icon size={14} strokeWidth={1.6} />{it.label}</DropdownMenu.Item>
+        {/each}
+      </DropdownMenu.Content>
+    </DropdownMenu.Portal>
+  </DropdownMenu.Root>
+{/snippet}
 
-<section class="editor" class:empty={!app.current} bind:this={section}>
+
+<section class="editor" class:empty={!app.current}>
   {#if app.current}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="toolbar" role="toolbar" tabindex="-1" onmousedown={(e) => e.preventDefault()}>
-      {@render buttons()}
+    <div class="toolbar" role="toolbar" aria-label="Mise en forme" tabindex="-1" onmousedown={(e) => e.preventDefault()}>
+      {@render buttons(true)}
     </div>
   {/if}
   {#key ember}
     {#if ember}<div class="ember"></div>{/if}
   {/key}
-  <div class="scroll" bind:this={scroller} onscroll={place}>
+  <div class="scroll" bind:this={scroller}>
     <div class="page" bind:this={page}>
     {#if app.current}
       <input
@@ -384,28 +457,20 @@
       <div class="tbl" onmouseenter={stay} onmouseleave={leave} onmousedown={(e) => e.preventDefault()}>
         {#if menu === 'row'}<div class="tsel" style:left="{h.tx}px" style:top="{h.ry}px" style:width="{h.tw}px" style:height="{h.rh}px"></div>{/if}
         {#if menu === 'col'}<div class="tsel" style:left="{h.cx}px" style:top="{h.ty}px" style:width="{h.cw}px" style:height="{h.th}px"></div>{/if}
-        <button class="grip row" class:open={menu === 'row'} aria-label="Ligne" title="Ligne" style:left="{h.tx - 18}px" style:top="{h.ry + h.rh / 2 - 10}px" onclick={() => (menu = menu === 'row' ? null : 'row')}><GripVertical size={12} /></button>
-        <button class="grip col" class:open={menu === 'col'} aria-label="Colonne" title="Colonne" style:left="{h.cx + h.cw / 2 - 10}px" style:top="{h.ty - 16}px" onclick={() => (menu = menu === 'col' ? null : 'col')}><GripHorizontal size={12} /></button>
-        <button class="add" aria-label="Ajouter une ligne" title="Ajouter une ligne" style:left="{h.tx}px" style:top="{h.ty + h.th + 4}px" style:width="{h.tw}px" style:height="14px" onclick={() => at(lastRow(h.table), (c) => c.addRowAfter())}><Plus size={11} /></button>
-        <button class="add" aria-label="Ajouter une colonne" title="Ajouter une colonne" style:left="{h.tx + h.tw + 4}px" style:top="{h.ty}px" style:width="14px" style:height="{h.th}px" onclick={() => at(lastCol(h.table), (c) => c.addColumnAfter())}><Plus size={11} /></button>
-        {#if menu}
-          <div class="tmenu" role="menu" style:left="{menu === 'row' ? h.tx : h.cx + h.cw / 2 - 10}px" style:top="{menu === 'row' ? h.ry + h.rh / 2 + 14 : h.ty + 8}px">
-            {#each menu === 'row' ? rowMenu : colMenu as it}
-              <button role="menuitem" class:danger={it.danger} onclick={() => at(h.cell, it.run)}><it.icon size={14} strokeWidth={1.6} />{it.label}</button>
-            {/each}
-          </div>
-        {/if}
+        {@render tableMenu('row', h, `left:${h.tx - 22}px;top:${h.ry + h.rh / 2 - 10}px`)}
+        {@render tableMenu('col', h, `left:${h.cx + h.cw / 2 - 10}px;top:${h.ty - 20}px`)}
+        <Tip class="add" label="Ajouter une ligne" style="left:{h.tx}px;top:{h.ty + h.th + 4}px;width:{h.tw}px;height:14px" onclick={() => at(lastRow(h.table), (c) => c.addRowAfter())}><Plus size={11} /></Tip>
+        <Tip class="add" label="Ajouter une colonne" style="left:{h.tx + h.tw + 4}px;top:{h.ty}px;width:14px;height:{h.th}px" onclick={() => at(lastCol(h.table), (c) => c.addColumnAfter())}><Plus size={11} /></Tip>
       </div>
     {/if}
     </div>
   </div>
 
-  {#if bar}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="bar" role="toolbar" tabindex="-1" style:left="{bar.x}px" style:top="{bar.y}px" onmousedown={(e) => e.preventDefault()}>
-      {@render buttons()}
-    </div>
-  {/if}
+  <!-- shown, hidden and placed by the bubble menu extension -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="bar" role="toolbar" aria-label="Mise en forme de la sélection" tabindex="-1" bind:this={barEl} style="visibility: hidden" onmousedown={(e) => e.preventDefault()}>
+    {@render buttons(false)}
+  </div>
 
   {#if app.current}
     <footer>
@@ -459,7 +524,7 @@
 
   /* table controls: faint until pointed at */
   .tbl { display: contents; }
-  .grip, .add {
+  .tbl :global(:is(.grip, .add)) {
     position: absolute;
     z-index: 3;
     display: grid;
@@ -474,9 +539,9 @@
     animation: tfade 140ms var(--ease);
     transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
   }
-  .grip { width: 20px; height: 20px; }
-  .grip:hover, .grip.open, .add:hover { opacity: 1; color: var(--fg); background: var(--hover); }
-  .grip.open { color: var(--orange); }
+  .tbl :global(.grip) { width: 20px; height: 20px; }
+  .tbl :global(:is(.grip:hover, .grip.open, .add:hover, .grip:focus-visible, .add:focus-visible)) { opacity: 1; color: var(--fg); background: var(--hover); }
+  .tbl :global(.grip.open) { color: var(--orange); }
   .tsel {
     position: absolute;
     z-index: 2;
@@ -485,34 +550,6 @@
     border-radius: 3px;
     background: color-mix(in srgb, var(--orange) 6%, transparent);
   }
-  .tmenu {
-    position: absolute;
-    z-index: 6;
-    display: grid;
-    min-width: 190px;
-    padding: 4px;
-    background: var(--surface-solid);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 10px 28px -12px #00000080;
-    animation: tfade 120ms var(--ease);
-  }
-  .tmenu button {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 5px;
-    background: none;
-    color: var(--fg);
-    font: 500 13px/1.2 var(--display);
-    text-align: left;
-    cursor: pointer;
-  }
-  .tmenu button :global(svg) { color: var(--muted); }
-  .tmenu button:hover { background: var(--hover); }
-  .tmenu button.danger:hover, .tmenu button.danger:hover :global(svg) { color: var(--orange); }
   @keyframes tfade { from { opacity: 0; } }
 
   .caret {
@@ -547,12 +584,13 @@
 
   .bar {
     position: absolute;
-    z-index: 5;
+    top: 0;
+    left: 0;
+    z-index: 50;
     display: flex;
     align-items: center;
     gap: 1px;
     padding: 3px;
-    transform: translateX(-50%);
     background: var(--surface-solid);
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -568,10 +606,10 @@
     height: 40px;
     border-bottom: 1px solid var(--line-soft);
   }
-  .bar .icon-btn, .toolbar .icon-btn { width: 28px; height: 28px; color: var(--muted); }
-  .bar .icon-btn.on, .toolbar .icon-btn.on { color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, transparent); }
+  .bar :global(.icon-btn), .toolbar :global(.icon-btn) { width: 28px; height: 28px; color: var(--muted); }
+  .bar :global(.icon-btn.on), .toolbar :global(.icon-btn.on) { color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, transparent); }
   .bar .sep, .toolbar .sep { width: 1px; height: 16px; margin: 0 3px; background: var(--line-soft); }
-  @keyframes bar { from { opacity: 0; transform: translate(-50%, 3px); } }
+  @keyframes bar { from { opacity: 0; } }
 
   footer {
     display: flex;

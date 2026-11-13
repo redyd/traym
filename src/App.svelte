@@ -3,8 +3,10 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { open } from '@tauri-apps/plugin-dialog'
   import { documentDir, join } from '@tauri-apps/api/path'
-  import { fly } from 'svelte/transition'
-  import { PanelLeft, Sparkles, Sun, Moon, Minus, Square, X, CircleAlert } from '@lucide/svelte'
+  import { Tooltip } from 'bits-ui'
+  import { Toaster } from 'svelte-sonner'
+  import { PanelLeft, Sparkles, Sun, Moon, Minus, Square, X } from '@lucide/svelte'
+  import Tip from './lib/Tip.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import Editor from './lib/Editor.svelte'
   import AgentPanel from './lib/AgentPanel.svelte'
@@ -86,14 +88,15 @@
 
 <svelte:window onkeydown={keys} />
 
+<Tooltip.Provider delayDuration={350}>
 <div class="shell">
   <header class="titlebar" data-tauri-drag-region>
     <div class="left" data-tauri-drag-region>
-      <button class="mark" title="Ouvrir un autre dossier" onclick={chooseVault}><i></i>traym</button>
+      <Tip class="mark" label="Ouvrir un autre dossier" onclick={chooseVault}><i></i>traym</Tip>
       {#if app.vault}
-        <button class="icon-btn" aria-pressed={app.sidebar} title="Barre latérale ({mod}+\)" onclick={toggleSidebar}>
+        <Tip class="icon-btn" aria-pressed={app.sidebar} label="Barre latérale ({mod}+\)" onclick={toggleSidebar}>
           <PanelLeft size={15} strokeWidth={1.5} />
-        </button>
+        </Tip>
       {/if}
     </div>
 
@@ -105,18 +108,18 @@
     </div>
 
     <div class="right" data-tauri-drag-region>
-      <button class="icon-btn" title="Thème ({mod}+Maj+L)" onclick={toggleTheme}>
+      <Tip class="icon-btn" label={dark ? `Thème clair (${mod}+Maj+L)` : `Thème sombre (${mod}+Maj+L)`} onclick={toggleTheme}>
         {#if dark}<Sun size={15} strokeWidth={1.5} />{:else}<Moon size={15} strokeWidth={1.5} />{/if}
-      </button>
+      </Tip>
       {#if app.vault}
-        <button class="icon-btn" aria-pressed={app.agent} title="Agent ({mod}+J)" onclick={toggleAgent}>
+        <Tip class="icon-btn" aria-pressed={app.agent} label="Agent ({mod}+J)" onclick={toggleAgent}>
           <Sparkles size={15} strokeWidth={1.5} />
-        </button>
+        </Tip>
       {/if}
       <span class="divider"></span>
-      <button class="icon-btn win" title="Réduire" onclick={() => win.minimize()}><Minus size={14} strokeWidth={1.5} /></button>
-      <button class="icon-btn win" title="Agrandir" onclick={() => win.toggleMaximize()}><Square size={11} strokeWidth={1.6} /></button>
-      <button class="icon-btn win close" title="Fermer" onclick={() => win.close()}><X size={15} strokeWidth={1.5} /></button>
+      <Tip class="icon-btn win" label="Réduire" onclick={() => win.minimize()}><Minus size={14} strokeWidth={1.5} /></Tip>
+      <Tip class="icon-btn win" label="Agrandir" onclick={() => win.toggleMaximize()}><Square size={11} strokeWidth={1.6} /></Tip>
+      <Tip class="icon-btn win close" label="Fermer" onclick={() => win.close()}><X size={15} strokeWidth={1.5} /></Tip>
     </div>
   </header>
 
@@ -146,14 +149,9 @@
 
   {#if app.palette}<Palette {commands} />{/if}
 
-  {#if app.error}
-    <div class="toast" role="alert" transition:fly={{ y: 10, duration: 220, opacity: 0 }}>
-      <CircleAlert size={15} strokeWidth={1.75} />
-      <span>{app.error}</span>
-      <button onclick={() => (app.error = null)} aria-label="Fermer"><X size={13} strokeWidth={1.75} /></button>
-    </div>
-  {/if}
+  <Toaster theme={dark ? 'dark' : 'light'} position="bottom-center" closeButton duration={5000} />
 </div>
+</Tooltip.Provider>
 
 <style>
   .shell { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
@@ -170,7 +168,7 @@
   }
   .left, .right { display: flex; align-items: center; gap: 2px; }
   .right { justify-content: flex-end; }
-  .mark {
+  .titlebar :global(.mark) {
     display: flex;
     align-items: center;
     gap: 7px;
@@ -182,8 +180,8 @@
     margin-left: -6px;
     border-radius: var(--r);
   }
-  .mark:hover { background: var(--orange-wash); }
-  .mark i, .welcome h1 i {
+  .titlebar :global(.mark:hover) { background: var(--orange-wash); }
+  .titlebar :global(.mark i), .welcome h1 i {
     display: block;
     width: 2px;
     height: 14px;
@@ -201,8 +199,8 @@
   .crumbs .leaf { color: var(--muted); }
   .sep { opacity: 0.6; }
   .divider { width: 1px; height: 16px; background: var(--line-soft); margin: 0 6px; }
-  .win { width: 30px; }
-  .close:hover { background: var(--orange); color: #fff; }
+  .titlebar :global(.win) { width: 30px; }
+  .titlebar :global(.close:hover) { background: var(--orange); color: #fff; }
 
   .body { flex: 1; min-height: 0; }
   .grid { display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
@@ -251,37 +249,4 @@
   .welcome button:hover { filter: brightness(1.06); }
   .welcome button:active { transform: scale(.98); }
 
-  .toast {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 20px;
-    width: fit-content;
-    margin: 0 auto; /* centred without transform, so the fly transition can own it */
-    z-index: 60;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    max-width: min(520px, calc(100vw - 32px));
-    padding: 10px 10px 10px 14px;
-    background: var(--surface-solid);
-    border: 1px solid var(--line-soft);
-    border-radius: 10px;
-    box-shadow: 0 1px 0 #ffffff08 inset, 0 16px 40px -16px #00000080, 0 2px 6px -2px #00000040;
-    font: 500 13px/1.4 var(--text);
-    color: var(--fg);
-  }
-  .toast > :global(svg) { flex: none; color: var(--orange); }
-  .toast span { flex: 1; min-width: 0; }
-  .toast button {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    margin-left: 4px;
-    border-radius: 6px;
-    color: var(--faint);
-    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
-  }
-  .toast button:hover { background: var(--hover); color: var(--fg); }
 </style>

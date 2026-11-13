@@ -1,25 +1,18 @@
 <script lang="ts">
   import { FilePlus, FolderPlus, GitBranch, RefreshCw } from '@lucide/svelte'
+  import { ContextMenu } from 'bits-ui'
   import Tree from './Tree.svelte'
+  import Tip from './Tip.svelte'
   import { app, newNote, newFolder, trash, move, exists, flash, persist, sync, gitInit, type Node } from './store.svelte'
 
-  let menu = $state<{ x: number; y: number; node: Node | null } | null>(null)
+  let node = $state<Node | null>(null) // what the context menu acts on: the item right-clicked, or the vault root
   let over = $state(false)
 
   const vaultName = $derived(app.vault?.split('/').filter(Boolean).pop() ?? '')
 
-  function onmenu(e: MouseEvent, node: Node | null) {
-    e.preventDefault()
-    e.stopPropagation()
-    menu = { x: Math.min(e.clientX, innerWidth - 200), y: Math.min(e.clientY, innerHeight - 180), node }
-  }
+  const onmenu = (_e: MouseEvent, n: Node | null) => (node = n)
 
   const dirOf = (n: Node | null) => (n ? (n.dir ? n.path : n.path.split('/').slice(0, -1).join('/')) : '')
-
-  function act(fn: () => unknown) {
-    menu = null
-    fn()
-  }
 
   function dropRoot(e: DragEvent) {
     e.preventDefault()
@@ -40,21 +33,24 @@
   }
 </script>
 
-<svelte:window onclick={() => (menu = null)} onkeydown={(e) => e.key === 'Escape' && (menu = null)} onblur={() => (menu = null)} />
-
 <aside class="sidebar">
   <header>
     <span class="vault" title={app.vault}>{vaultName}</span>
-    <button class="icon-btn" title="Nouvelle note" onclick={() => newNote()}><FilePlus size={15} strokeWidth={1.5} /></button>
-    <button class="icon-btn" title="Nouveau dossier" onclick={() => newFolder()}><FolderPlus size={15} strokeWidth={1.5} /></button>
+    <Tip class="icon-btn" label="Nouvelle note" onclick={() => newNote()}><FilePlus size={15} strokeWidth={1.5} /></Tip>
+    <Tip class="icon-btn" label="Nouveau dossier" onclick={() => newFolder()}><FolderPlus size={15} strokeWidth={1.5} /></Tip>
   </header>
 
+  <ContextMenu.Root>
+  <ContextMenu.Trigger>
+  {#snippet child({ props })}
+  <!-- capture runs before the items' own handler, which then names the item -->
   <div
+    {...props}
     class="tree"
     class:over
     role="tree"
     tabindex="-1"
-    oncontextmenu={(e) => onmenu(e, null)}
+    oncontextmenucapture={() => (node = null)}
     ondragover={(e) => { e.preventDefault(); over = true }}
     ondragleave={() => (over = false)}
     ondrop={dropRoot}
@@ -68,6 +64,21 @@
       </div>
     {/if}
   </div>
+  {/snippet}
+  </ContextMenu.Trigger>
+  <ContextMenu.Portal>
+    <ContextMenu.Content class="menu" collisionPadding={8} onCloseAutoFocus={(e) => e.preventDefault()}>
+      <ContextMenu.Item onSelect={() => newNote(dirOf(node))}>Nouvelle note</ContextMenu.Item>
+      <ContextMenu.Item onSelect={() => newFolder(dirOf(node))}>Nouveau dossier</ContextMenu.Item>
+      {#if node}
+        {@const n = node}
+        <ContextMenu.Separator />
+        <ContextMenu.Item onSelect={() => (app.renaming = n.path)}>Renommer</ContextMenu.Item>
+        <ContextMenu.Item class="danger" onSelect={() => trash(n.path)}>Mettre à la corbeille</ContextMenu.Item>
+      {/if}
+    </ContextMenu.Content>
+  </ContextMenu.Portal>
+  </ContextMenu.Root>
 
   <footer class="git">
     <GitBranch size={14} strokeWidth={1.5} />
@@ -75,9 +86,9 @@
       <span class="label">
         {app.git.changes ? `${app.git.changes} modification${app.git.changes > 1 ? 's' : ''}` : 'À jour'}{app.git.remote ? '' : ' · local'}
       </span>
-      <button class="icon-btn" class:spin={app.syncing} title="Synchroniser (commit + push)" disabled={app.syncing} onclick={sync}>
+      <Tip class={app.syncing ? 'icon-btn spin' : 'icon-btn'} label="Synchroniser (commit + push)" disabled={app.syncing} onclick={sync}>
         <RefreshCw size={14} strokeWidth={1.5} />
-      </button>
+      </Tip>
     {:else}
       <button class="label link" onclick={gitInit}>Activer le suivi git</button>
     {/if}
@@ -86,18 +97,6 @@
   <div class="handle" role="separator" aria-orientation="vertical" onpointerdown={resize}></div>
 </aside>
 
-{#if menu}
-  {@const n = menu.node}
-  <div class="menu" style:left="{menu.x}px" style:top="{menu.y}px" role="menu">
-    <button role="menuitem" onclick={() => act(() => newNote(dirOf(n)))}>Nouvelle note</button>
-    <button role="menuitem" onclick={() => act(() => newFolder(dirOf(n)))}>Nouveau dossier</button>
-    {#if n}
-      <hr />
-      <button role="menuitem" onclick={() => act(() => (app.renaming = n.path))}>Renommer</button>
-      <button role="menuitem" class="danger" onclick={() => act(() => trash(n.path))}>Mettre à la corbeille</button>
-    {/if}
-  </div>
-{/if}
 
 <style>
   .sidebar {
@@ -148,7 +147,7 @@
   }
   .git .label { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .git .link:hover { color: var(--orange); }
-  .spin :global(svg) { animation: spin 0.9s linear infinite; }
+  :global(.spin svg) { animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .handle {
@@ -162,28 +161,4 @@
   }
   .handle:hover, .handle:active { background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat; }
 
-  .menu {
-    position: fixed;
-    z-index: 50;
-    min-width: 188px;
-    padding: 4px;
-    background: var(--surface-solid);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 12px 32px -12px #0000008c;
-    animation: menu 140ms var(--ease);
-    transform-origin: top left;
-  }
-  @keyframes menu { from { opacity: 0; transform: scale(.97); } }
-  .menu button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 6px 10px;
-    border-radius: 4px;
-    color: var(--fg);
-  }
-  .menu button:hover { background: var(--orange-wash); }
-  .menu .danger:hover { color: var(--orange); }
-  .menu hr { border: 0; border-top: 1px solid var(--line-soft); margin: 4px 2px; }
 </style>

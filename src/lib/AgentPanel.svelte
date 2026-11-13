@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Tip from './Tip.svelte'
   import { onMount, tick } from 'svelte'
   import { listen } from '@tauri-apps/api/event'
   import { marked } from 'marked'
@@ -121,7 +122,7 @@
       <button role="tab" aria-selected={agent === 'claude'} onclick={() => pick('claude')}>Claude</button>
       <button role="tab" aria-selected={agent === 'codex'} onclick={() => pick('codex')}>Codex</button>
     </div>
-    <button class="icon-btn" title="Nouvelle conversation" disabled={running} onclick={reset}><SquarePen size={15} strokeWidth={1.5} /></button>
+    <Tip class="icon-btn" label="Nouvelle conversation" disabled={running} onclick={reset}><SquarePen size={15} strokeWidth={1.5} /></Tip>
   </header>
 
   <div class="lines" bind:this={list}>
