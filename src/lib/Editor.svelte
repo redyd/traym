@@ -58,6 +58,23 @@
     return true
   }
 
+  /** Enter does its usual job (split, continue a list…), then the new line starts as plain text:
+   *  no carried-over bold/italic/strike/code, and a heading's next line is a paragraph. Code blocks keep Enter as is. */
+  let entering = false
+  function enter() {
+    const e = editor!
+    if (entering || e.isActive('codeBlock')) return false
+    entering = true
+    try {
+      if (!e.commands.keyboardShortcut('Enter')) return false
+    } finally {
+      entering = false
+    }
+    const c = e.chain()
+    if (e.isActive('heading')) c.setParagraph()
+    return c.command(({ tr }) => (tr.setStoredMarks([]), true)).run()
+  }
+
   const keys = Extension.create({
     name: 'traymKeys',
     priority: 1000,
@@ -67,6 +84,7 @@
       'Mod-Shift-s': () => mark('strike'),
       'Mod-e': () => mark('code'),
       'Mod-Enter': exit,
+      Enter: enter,
     }),
   })
 
@@ -143,7 +161,7 @@
   }
 
   // the editor always keeps an empty paragraph at the end: don't write it out as trailing blank lines
-  const text = () => front + editor!.getMarkdown().replace(/\s+$/, '\n').replace(/^\n$/, '')
+  const text = () => front + editor!.getMarkdown().replace(/\s*$/, '\n').replace(/^\n$/, '')
   const count = (t: string) => (t.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? []).length
 
   async function save() {
