@@ -25,7 +25,7 @@
   let section: HTMLElement
   let page: HTMLElement
   let caretEl = $state<HTMLElement>()
-  let caret = $state<{ x: number; y: number; h: number; typing: boolean } | null>(null)
+  let caret = $state<{ x: number; y: number; h: number } | null>(null)
 
   const INLINE = ['bold', 'italic', 'strike', 'code']
   /** One inline style at a time: switching to another drops the current one. */
@@ -116,14 +116,14 @@
   }
 
   // Word-style caret: our own bar that glides to its new spot (the native one jumps), blinking softly
-  // typing moves it instantly (a glide would trail behind fast typing); clicks, arrows and jumps glide
-  function moveCaret(typing = false) {
+  function moveCaret() {
     const sel = editor?.state.selection
     if (!editor || !sel?.empty || !editor.isFocused) return void (caret = null)
     const c = editor.view.coordsAtPos(sel.head), box = page.getBoundingClientRect()
-    caret = { x: c.left - box.left, y: c.top - box.top, h: c.bottom - c.top, typing }
-    // restart the blink so the caret stays solid while typing
-    caretEl?.getAnimations().forEach((a) => (a.currentTime = 0))
+    caret = { x: c.left - box.left, y: c.top - box.top, h: c.bottom - c.top }
+    // restart only the blink so the caret stays solid while typing. getAnimations() also lists the glide
+    // transition, and rewinding that one snapped the caret back to where it came from
+    caretEl?.getAnimations().forEach((a) => { if (!(a instanceof CSSTransition)) a.currentTime = 0 })
   }
   let bar = $state<{ x: number; y: number } | null>(null)
   let on = $state<string[]>([])
@@ -166,11 +166,11 @@
       extensions: [...extensions, Markdown, keys],
       content: body,
       contentType: 'markdown',
-      onTransaction: ({ transaction }) => {
+      onTransaction: () => {
         const a = tools.filter((t) => t?.active()).map((t) => t!.key)
         if (a.join() !== on.join()) on = a
         place()
-        moveCaret(transaction.docChanged)
+        moveCaret()
       },
       onFocus: () => (place(), moveCaret()),
       onBlur: () => (place(), moveCaret()),
@@ -308,7 +308,7 @@
     {/if}
     <div bind:this={host}></div>
     {#if caret}
-      <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px" style:transition={caret.typing ? 'none' : null}></div>
+      <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px"></div>
     {/if}
     </div>
   </div>
