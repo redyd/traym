@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { Editor, Extension } from '@tiptap/core'
+  import { Editor, Extension, type ChainedCommands } from '@tiptap/core'
   import { Markdown } from '@tiptap/markdown'
   import { convertFileSrc } from '@tauri-apps/api/core'
   import { open } from '@tauri-apps/plugin-dialog'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
-    Table, Image, BetweenHorizontalStart, BetweenHorizontalEnd, BetweenVerticalStart, BetweenVerticalEnd, Trash2,
+    Table, Image, BetweenHorizontalStart, BetweenHorizontalEnd, BetweenVerticalStart, BetweenVerticalEnd, Trash2, GripVertical, GripHorizontal, Plus,
   } from '@lucide/svelte'
   import { extensions, split, media } from './schema'
   import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists } from './store.svelte'
@@ -113,30 +113,46 @@
   const tableTools: Tool[] = [
     { key: 'deltable', label: 'Supprimer le tableau', icon: Trash2, run: () => cmd().deleteTable().run(), active: () => false },
   ]
-  // in-table handles: sit on the table's top edge above the current column, and on its left edge beside the current row
-  type Handle = { label: string; icon: typeof Bold; run: () => unknown; danger?: boolean }
-  const colTools: Handle[] = [
-    { label: 'Insérer une colonne à gauche', icon: BetweenVerticalStart, run: () => cmd().addColumnBefore().run() },
-    { label: 'Supprimer la colonne', icon: Trash2, run: () => cmd().deleteColumn().run(), danger: true },
-    { label: 'Insérer une colonne à droite', icon: BetweenVerticalEnd, run: () => cmd().addColumnAfter().run() },
-  ]
-  const rowTools: Handle[] = [
-    { label: 'Insérer une ligne au-dessus', icon: BetweenHorizontalStart, run: () => cmd().addRowBefore().run() },
-    { label: 'Supprimer la ligne', icon: Trash2, run: () => cmd().deleteRow().run(), danger: true },
-    { label: 'Insérer une ligne en dessous', icon: BetweenHorizontalEnd, run: () => cmd().addRowAfter().run() },
-  ]
-  let grid = $state<{ cx: number; top: number; left: number; cy: number } | null>(null)
+  // Notion-style table controls, shown on hover only: a grip beside the hovered row / above the hovered
+  // column opens a small menu, and thin "+" strips under / right of the table add a row / column at the end
+  type Hover = { cell: HTMLElement; table: HTMLTableElement; tx: number; ty: number; tw: number; th: number; ry: number; rh: number; cx: number; cw: number }
+  let hov = $state<Hover | null>(null)
+  let menu = $state<'row' | 'col' | null>(null)
+  let hideT = 0
 
-  function placeGrid() {
-    const e = editor
-    if (!e || !e.isFocused || !e.isActive('table')) return void (grid = null)
-    const { node } = e.view.domAtPos(e.state.selection.from)
-    const cell = (node instanceof HTMLElement ? node : node.parentElement)?.closest('td, th')
+  function track(e: MouseEvent) {
+    if (menu) return
+    const cell = (e.target as HTMLElement).closest?.('td, th') as HTMLElement | null
     const table = cell?.closest('table')
-    if (!cell || !table) return void (grid = null)
-    const p = page.getBoundingClientRect(), c = cell.getBoundingClientRect(), t = table.getBoundingClientRect()
-    grid = { cx: c.left - p.left + c.width / 2, top: t.top - p.top, left: t.left - p.left, cy: c.top - p.top + c.height / 2 }
+    if (!cell || !table) return leave()
+    clearTimeout(hideT)
+    const p = page.getBoundingClientRect(), t = table.getBoundingClientRect(), c = cell.getBoundingClientRect()
+    hov = { cell, table, tx: t.left - p.left, ty: t.top - p.top, tw: t.width, th: t.height, ry: c.top - p.top, rh: c.height, cx: c.left - p.left, cw: c.width }
   }
+  // a short grace period lets the pointer travel from a cell to its grip outside the table
+  const leave = () => { if (menu) return; clearTimeout(hideT); hideT = window.setTimeout(() => (hov = null), 300) }
+  const stay = () => clearTimeout(hideT)
+
+  /** Run a table command as if the caret were in `cell`. */
+  function at(cell: HTMLElement, f: (c: ChainedCommands) => ChainedCommands) {
+    f(editor!.chain().focus().setTextSelection(editor!.view.posAtDOM(cell, 0) + 1)).run()
+    menu = null
+    hov = null
+  }
+  const lastRow = (t: HTMLTableElement) => t.rows[t.rows.length - 1].cells[0] as HTMLElement
+  const lastCol = (t: HTMLTableElement) => t.rows[0].cells[t.rows[0].cells.length - 1] as HTMLElement
+
+  type Item = { label: string; icon: typeof Bold; run: (c: ChainedCommands) => ChainedCommands; danger?: boolean }
+  const rowMenu: Item[] = [
+    { label: 'Insérer au-dessus', icon: BetweenHorizontalStart, run: (c) => c.addRowBefore() },
+    { label: 'Insérer en dessous', icon: BetweenHorizontalEnd, run: (c) => c.addRowAfter() },
+    { label: 'Supprimer la ligne', icon: Trash2, run: (c) => c.deleteRow(), danger: true },
+  ]
+  const colMenu: Item[] = [
+    { label: 'Insérer à gauche', icon: BetweenVerticalStart, run: (c) => c.addColumnBefore() },
+    { label: 'Insérer à droite', icon: BetweenVerticalEnd, run: (c) => c.addColumnAfter() },
+    { label: 'Supprimer la colonne', icon: Trash2, run: (c) => c.deleteColumn(), danger: true },
+  ]
 
   // vault-relative path of `to`, written relative to the note's folder `dir`
   function relTo(dir: string, to: string) {
@@ -211,10 +227,9 @@
         if (a.join() !== on.join()) on = a
         place()
         moveCaret()
-        placeGrid()
       },
-      onFocus: () => (place(), moveCaret(), placeGrid()),
-      onBlur: () => (place(), moveCaret(), placeGrid()),
+      onFocus: () => (place(), moveCaret()),
+      onBlur: () => (place(), moveCaret()),
       onUpdate: ({ editor: e }) => {
         words = count(e.getText())
         status = 'saving'
@@ -278,8 +293,17 @@
     const up = () => { if (dragging) { dragging = false; requestAnimationFrame(place) } }
     host.addEventListener('pointerdown', down)
     window.addEventListener('pointerup', up)
+    host.addEventListener('mousemove', track)
+    host.addEventListener('mouseleave', leave)
+    // a table menu closes on any click outside it, or Escape
+    const close = (e: Event) => {
+      if (menu && !(e.target as HTMLElement).closest?.('.tmenu, .grip')) { menu = null; leave() }
+    }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && menu) { menu = null; leave() } }
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', esc)
     // reflow (window resize, images loading) moves text under a still caret
-    const ro = new ResizeObserver(() => (moveCaret(), placeGrid()))
+    const ro = new ResizeObserver(() => moveCaret())
     ro.observe(host)
     const un = onDiskChange(async (paths) => {
       if (!path || !editor || !paths.includes(path)) return
@@ -297,6 +321,8 @@
     })
     return () => {
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', esc)
       ro.disconnect()
       save()
       un.then((f) => f())
@@ -321,14 +347,6 @@
   {/if}
 {/snippet}
 
-{#snippet handles(list: Handle[], cls: string, x: number, y: number)}
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="cellbar {cls}" role="toolbar" tabindex="-1" style:left="{x}px" style:top="{y}px" onmousedown={(e) => e.preventDefault()}>
-    {#each list as h}
-      <button class="icon-btn" class:danger={h.danger} title={h.label} aria-label={h.label} onclick={() => h.run()}><h.icon size={13} strokeWidth={1.7} /></button>
-    {/each}
-  </div>
-{/snippet}
 
 <section class="editor" class:empty={!app.current} bind:this={section}>
   {#if app.current}
@@ -360,9 +378,24 @@
     {#if caret}
       <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px"></div>
     {/if}
-    {#if grid}
-      {@render handles(colTools, 'col', grid.cx, grid.top)}
-      {@render handles(rowTools, 'row', grid.left, grid.cy)}
+    {#if hov}
+      {@const h = hov}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="tbl" onmouseenter={stay} onmouseleave={leave} onmousedown={(e) => e.preventDefault()}>
+        {#if menu === 'row'}<div class="tsel" style:left="{h.tx}px" style:top="{h.ry}px" style:width="{h.tw}px" style:height="{h.rh}px"></div>{/if}
+        {#if menu === 'col'}<div class="tsel" style:left="{h.cx}px" style:top="{h.ty}px" style:width="{h.cw}px" style:height="{h.th}px"></div>{/if}
+        <button class="grip row" class:open={menu === 'row'} aria-label="Ligne" title="Ligne" style:left="{h.tx - 18}px" style:top="{h.ry + h.rh / 2 - 10}px" onclick={() => (menu = menu === 'row' ? null : 'row')}><GripVertical size={12} /></button>
+        <button class="grip col" class:open={menu === 'col'} aria-label="Colonne" title="Colonne" style:left="{h.cx + h.cw / 2 - 10}px" style:top="{h.ty - 16}px" onclick={() => (menu = menu === 'col' ? null : 'col')}><GripHorizontal size={12} /></button>
+        <button class="add" aria-label="Ajouter une ligne" title="Ajouter une ligne" style:left="{h.tx}px" style:top="{h.ty + h.th + 4}px" style:width="{h.tw}px" style:height="14px" onclick={() => at(lastRow(h.table), (c) => c.addRowAfter())}><Plus size={11} /></button>
+        <button class="add" aria-label="Ajouter une colonne" title="Ajouter une colonne" style:left="{h.tx + h.tw + 4}px" style:top="{h.ty}px" style:width="14px" style:height="{h.th}px" onclick={() => at(lastCol(h.table), (c) => c.addColumnAfter())}><Plus size={11} /></button>
+        {#if menu}
+          <div class="tmenu" role="menu" style:left="{menu === 'row' ? h.tx : h.cx + h.cw / 2 - 10}px" style:top="{menu === 'row' ? h.ry + h.rh / 2 + 14 : h.ty + 8}px">
+            {#each menu === 'row' ? rowMenu : colMenu as it}
+              <button role="menuitem" class:danger={it.danger} onclick={() => at(h.cell, it.run)}><it.icon size={14} strokeWidth={1.6} />{it.label}</button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/if}
     </div>
   </div>
@@ -424,24 +457,63 @@
 
   .page { position: relative; max-width: 700px; margin: 0 auto; }
 
-  .cellbar {
+  /* table controls: faint until pointed at */
+  .tbl { display: contents; }
+  .grip, .add {
     position: absolute;
     z-index: 3;
-    display: flex;
-    gap: 1px;
-    padding: 2px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--faint);
+    opacity: 0.7;
+    cursor: pointer;
+    animation: tfade 140ms var(--ease);
+    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+  }
+  .grip { width: 20px; height: 20px; }
+  .grip:hover, .grip.open, .add:hover { opacity: 1; color: var(--fg); background: var(--hover); }
+  .grip.open { color: var(--orange); }
+  .tsel {
+    position: absolute;
+    z-index: 2;
+    pointer-events: none;
+    border: 1.5px solid var(--orange);
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--orange) 6%, transparent);
+  }
+  .tmenu {
+    position: absolute;
+    z-index: 6;
+    display: grid;
+    min-width: 190px;
+    padding: 4px;
     background: var(--surface-solid);
     border: 1px solid var(--line);
-    border-radius: 7px;
-    box-shadow: 0 6px 18px -10px #00000066;
-    animation: cellbar 120ms var(--ease);
+    border-radius: 8px;
+    box-shadow: 0 10px 28px -12px #00000080;
+    animation: tfade 120ms var(--ease);
   }
-  /* just outside the table, never over its cells: above it (tables get room for this) and in the page's left margin */
-  .cellbar.col { transform: translate(-50%, calc(-100% - 3px)); }
-  .cellbar.row { flex-direction: column; transform: translate(calc(-100% - 3px), -50%); }
-  .cellbar .icon-btn { width: 22px; height: 22px; color: var(--muted); }
-  .cellbar .icon-btn.danger:hover { color: var(--orange); }
-  @keyframes cellbar { from { opacity: 0; } }
+  .tmenu button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 5px;
+    background: none;
+    color: var(--fg);
+    font: 500 13px/1.2 var(--display);
+    text-align: left;
+    cursor: pointer;
+  }
+  .tmenu button :global(svg) { color: var(--muted); }
+  .tmenu button:hover { background: var(--hover); }
+  .tmenu button.danger:hover, .tmenu button.danger:hover :global(svg) { color: var(--orange); }
+  @keyframes tfade { from { opacity: 0; } }
 
   .caret {
     position: absolute;
@@ -618,5 +690,5 @@
   :global(.tiptap th) { font-weight: 650; text-align: left; background: var(--surface); }
   :global(.tiptap :is(td, th) p) { margin: 0; }
   :global(.tiptap .selectedCell) { background: var(--select); }
-  :global(.tiptap .tableWrapper) { overflow-x: auto; margin-top: 30px; }
+  :global(.tiptap .tableWrapper) { overflow-x: auto; margin: 18px 0 22px; }
 </style>
