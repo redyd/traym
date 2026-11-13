@@ -1,0 +1,133 @@
+@import '@fontsource-variable/red-hat-display';
+@import '@fontsource-variable/red-hat-text';
+@import '@fontsource-variable/red-hat-mono';
+
+:root {
+  --bg: #2b1a0e;
+  --bg-deep: #24150b;
+  --surface: #3a2414cc;
+  --surface-solid: #36210f;
+  --hover: #ffffff0a;
+  --line: #5a3a22;
+  --line-soft: #4a2f1b;
+  --fg: #fbeee0;
+  --muted: #d6b89c;
+  --faint: #9c7b60;
+  --orange: #ff7a3d;
+  --amber: #ffb347;
+  --orange-wash: #ff7a3d1f;
+  --select: #ff7a3d38;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+
+  --display: 'Red Hat Display Variable', system-ui, sans-serif;
+  --text: 'Red Hat Text Variable', system-ui, sans-serif;
+  --mono: 'Red Hat Mono Variable', ui-monospace, monospace;
+
+  --r: 6px;
+  --t-fast: 140ms;
+  --t: 200ms;
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --bg: #fcf9f6;
+  --bg-deep: #f6f0ea;
+  --surface: #f3ebe3cc;
+  --surface-solid: #f1e8df;
+  --hover: #2b1a0e0a;
+  --line: #e4d6c8;
+  --line-soft: #ede3d8;
+  --fg: #2b1a0e;
+  --muted: #6e5240;
+  --faint: #a68c78;
+  --orange: #e8591a;
+  --amber: #c77a12;
+  --orange-wash: #e8591a14;
+  --select: #e8591a2a;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 var(--display);
+  font-feature-settings: 'tnum' 0;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+#app { height: 100%; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+button:disabled { cursor: default; }
+
+input, textarea {
+  font: inherit;
+  color: inherit;
+  user-select: text;
+  cursor: text;
+}
+
+.cm-content { cursor: text; }
+.cm-task, .cm-link { cursor: pointer; }
+[role='treeitem'], [role='option'] { cursor: pointer; }
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 1.5px solid var(--orange);
+  outline-offset: 1px;
+  border-radius: var(--r);
+}
+
+::selection { background: var(--select); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-soft);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--line); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Small square icon button used across the chrome */
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r);
+  color: var(--muted);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.icon-btn:hover { background: var(--hover); color: var(--fg); }
+.icon-btn[aria-pressed='true'] { color: var(--orange); }
+
+kbd {
+  font: 500 11px/1 var(--display);
+  color: var(--faint);
+  padding: 3px 5px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
