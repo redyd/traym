@@ -165,6 +165,26 @@ async fn git_sync(core: C<'_>) -> Res<()> {
 }
 
 #[tauri::command]
+async fn git_set_remote(core: C<'_>, url: String) -> Res<()> {
+    git::set_remote(&core.vault()?, &url).await
+}
+
+#[tauri::command]
+async fn git_pull(core: C<'_>) -> Res<()> {
+    git::pull(&core.vault()?).await
+}
+
+#[tauri::command]
+async fn git_resolve(core: C<'_>, path: String, side: String) -> Res<()> {
+    git::resolve(&core.vault()?, &path, &side).await
+}
+
+#[tauri::command]
+async fn git_abort(core: C<'_>) -> Res<()> {
+    git::abort(&core.vault()?).await
+}
+
+#[tauri::command]
 async fn agent_send(core: C<'_>, agent: String, prompt: String, session: Option<String>) -> Res<()> {
     agent::send(core.inner().clone(), agent, prompt, session).await
 }
@@ -192,7 +212,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            open_vault, import_file, save_file, tree, read_note, write_note, create_note, create_folder, move_path, trash_path, git_status, git_init, git_sync, agent_send, agent_stop
+            open_vault, import_file, save_file, tree, read_note, write_note, create_note, create_folder, move_path, trash_path, git_status, git_init, git_sync, git_set_remote, git_pull, git_resolve, git_abort, agent_send, agent_stop
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de traym");

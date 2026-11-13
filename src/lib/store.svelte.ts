@@ -1,5 +1,6 @@
 import { invoke, type InvokeArgs, type InvokeOptions } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { SvelteSet } from 'svelte/reactivity'
 import { toast } from 'svelte-sonner'
 
@@ -23,8 +24,9 @@ export const app = $state({
   sidebarW: Number(ls.get('sidebarW') ?? 248),
   agent: ls.get('agentOpen') === '1',
   palette: null as null | 'files' | 'commands',
-  git: null as null | { changes: number; remote: boolean },
+  git: null as null | { changes: number; remote: string | null; conflicts: string[] },
   syncing: false,
+  closing: null as null | 'sync' | { error: string }, // sync-on-quit popup
 })
 
 // set by the editor so file moves never race a pending autosave
@@ -55,12 +57,13 @@ export async function openVault(path: string) {
   const last = ls.get('current')
   app.current = last && flat().includes(last) ? last : null
   persist()
-  gitStatus()
+  await gitStatus()
+  pull()
 }
 
 export async function refresh() {
   app.tree = await call<Node[]>('tree')
-  gitStatus()
+  await gitStatus()
 }
 
 export const gitStatus = async () => (app.git = await invoke<typeof app.git>('git_status').catch(() => null))
@@ -70,15 +73,43 @@ export async function gitInit() {
   await gitStatus()
 }
 
-export async function sync() {
+export const sync = () => busy(() => call('git_sync'))
+
+async function busy(fn: () => Promise<unknown>) {
   if (app.syncing) return
   app.syncing = true
   try {
     await hooks.flush()
-    await call('git_sync')
+    await fn()
   } finally {
     app.syncing = false
-    gitStatus()
+    await refresh().catch(() => {})
+  }
+}
+
+// opening a vault: bring in what was pushed from elsewhere (a conflict locks the vault, see Conflicts.svelte)
+export async function pull() {
+  if (app.git?.remote && !app.git.conflicts.length) await busy(() => call('git_pull')).catch(() => {})
+}
+
+export const setRemote = (url: string) => busy(() => call('git_set_remote', { url })).then(pull)
+
+export const resolve = (path: string, side: 'ours' | 'theirs' | 'manual') => busy(() => call('git_resolve', { path, side }))
+
+export const abortMerge = () => busy(() => call('git_abort'))
+
+// closing the window: commit (+ push when there is a remote), then really close
+export async function quit() {
+  const win = getCurrentWindow()
+  if (app.closing === 'sync') return
+  if (!app.git || app.git.conflicts.length) return win.destroy()
+  app.closing = 'sync'
+  try {
+    await hooks.flush()
+    await invoke('git_sync')
+    await win.destroy()
+  } catch (e) {
+    app.closing = { error: String(e) }
   }
 }
 

@@ -11,7 +11,8 @@
   import Editor from './lib/Editor.svelte'
   import AgentPanel from './lib/AgentPanel.svelte'
   import Palette from './lib/Palette.svelte'
-  import { app, openVault, newNote, newFolder, persist, parent, title, mod } from './lib/store.svelte'
+  import Conflicts from './lib/Conflicts.svelte'
+  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit } from './lib/store.svelte'
 
   const win = getCurrentWindow()
   let dark = $state(true)
@@ -57,7 +58,7 @@
   ]
 
   function keys(e: KeyboardEvent) {
-    if (!(e.ctrlKey || e.metaKey) || e.altKey || !app.vault) return
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || !app.vault || locked) return
     const k = e.key.toLowerCase()
     const map: Record<string, () => void> = {
       p: () => (app.palette = app.palette === 'files' ? null : 'files'),
@@ -73,7 +74,14 @@
     }
   }
 
+  // a pull left conflicts: the notes stay closed until they are resolved
+  const locked = $derived(!!app.git?.conflicts.length)
+
   onMount(() => {
+    win.onCloseRequested((e) => {
+      e.preventDefault()
+      quit()
+    })
     applyTheme()
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme)
     // first launch: no picker, straight into ~/Documents/traym
@@ -93,7 +101,7 @@
   <header class="titlebar" data-tauri-drag-region>
     <div class="left" data-tauri-drag-region>
       <Tip class="mark" label="Ouvrir un autre dossier" onclick={chooseVault}><i></i>traym</Tip>
-      {#if app.vault}
+      {#if app.vault && !locked}
         <Tip class="icon-btn" aria-pressed={app.sidebar} label="Barre latérale ({mod}+\)" onclick={toggleSidebar}>
           <PanelLeft size={15} strokeWidth={1.5} />
         </Tip>
@@ -111,7 +119,7 @@
       <Tip class="icon-btn" label={dark ? `Thème clair (${mod}+Maj+L)` : `Thème sombre (${mod}+Maj+L)`} onclick={toggleTheme}>
         {#if dark}<Sun size={15} strokeWidth={1.5} />{:else}<Moon size={15} strokeWidth={1.5} />{/if}
       </Tip>
-      {#if app.vault}
+      {#if app.vault && !locked}
         <Tip class="icon-btn" aria-pressed={app.agent} label="Agent ({mod}+J)" onclick={toggleAgent}>
           <Sparkles size={15} strokeWidth={1.5} />
         </Tip>
@@ -125,6 +133,8 @@
 
   {#if !ready}
     <div class="body"></div>
+  {:else if app.vault && locked}
+    <Conflicts />
   {:else if app.vault}
     <main
       class="body grid"
@@ -147,7 +157,25 @@
     </main>
   {/if}
 
-  {#if app.palette}<Palette {commands} />{/if}
+  {#if app.palette && !locked}<Palette {commands} />{/if}
+
+  {#if app.closing}
+    <div class="closing" role="alertdialog" aria-modal="true" aria-labelledby="closing-title">
+      <div class="card">
+        {#if app.closing === 'sync'}
+          <span class="spinner" aria-hidden="true"></span>
+          <p id="closing-title">Synchronisation…</p>
+        {:else}
+          <p id="closing-title">La synchronisation a échoué</p>
+          <pre>{app.closing.error}</pre>
+          <div class="actions">
+            <button onclick={() => (app.closing = null)}>Annuler</button>
+            <button class="primary" onclick={() => win.destroy()}>Quitter quand même</button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 
   <Toaster theme={dark ? 'dark' : 'light'} position="bottom-center" closeButton duration={5000} />
 </div>
@@ -207,6 +235,51 @@
   .grid.anim { transition: grid-template-columns 240ms var(--ease); }
   .pane { overflow: hidden; height: 100%; }
   .pane.right { display: flex; justify-content: flex-end; }
+
+  .closing {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: #0006;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    max-width: 440px;
+    padding: 22px 24px;
+    border-radius: 10px;
+    background: var(--surface-solid);
+    border: 1px solid var(--line);
+    font: 600 14px/1.4 var(--display);
+  }
+  .card p { margin: 0; }
+  .card pre {
+    margin: 0;
+    max-height: 160px;
+    overflow: auto;
+    white-space: pre-wrap;
+    font: 12px/1.5 var(--mono);
+    color: var(--muted);
+  }
+  .spinner {
+    width: 22px;
+    height: 22px;
+    border: 2px solid var(--line);
+    border-top-color: var(--orange);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .actions { display: flex; gap: 8px; }
+  .actions button { padding: 8px 12px; border-radius: var(--r); font-weight: 600; }
+  .actions button:hover { background: var(--hover); }
+  .actions .primary { background: var(--orange); color: #fff; }
+  .actions .primary:hover { background: var(--orange); filter: brightness(1.06); }
 
   .welcome {
     display: flex;

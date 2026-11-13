@@ -1,14 +1,24 @@
 <script lang="ts">
-  import { FilePlus, FolderPlus, GitBranch, RefreshCw } from '@lucide/svelte'
-  import { ContextMenu } from 'bits-ui'
+  import { FilePlus, FolderPlus, GitBranch, Link, RefreshCw } from '@lucide/svelte'
+  import { ContextMenu, Popover } from 'bits-ui'
   import Tree from './Tree.svelte'
   import Tip from './Tip.svelte'
-  import { app, newNote, newFolder, trash, move, exists, flash, persist, sync, gitInit, type Node } from './store.svelte'
+  import { app, newNote, newFolder, trash, move, exists, flash, persist, sync, gitInit, setRemote, type Node } from './store.svelte'
 
   let node = $state<Node | null>(null) // what the context menu acts on: the item right-clicked, or the vault root
   let over = $state(false)
 
   const vaultName = $derived(app.vault?.split('/').filter(Boolean).pop() ?? '')
+
+  let remoteOpen = $state(false)
+  let remoteUrl = $state('')
+  // `git@github.com:me/notes.git` or `https://github.com/me/notes` → github.com
+  const host = (url: string) => url.match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^:/]+)/i)?.[1] ?? url
+
+  function saveRemote(url: string) {
+    remoteOpen = false
+    setRemote(url).catch(() => {})
+  }
 
   const onmenu = (_e: MouseEvent, n: Node | null) => (node = n)
 
@@ -84,8 +94,27 @@
     <GitBranch size={14} strokeWidth={1.5} />
     {#if app.git}
       <span class="label">
-        {app.git.changes ? `${app.git.changes} modification${app.git.changes > 1 ? 's' : ''}` : 'À jour'}{app.git.remote ? '' : ' · local'}
+        {app.git.changes ? `${app.git.changes} modification${app.git.changes > 1 ? 's' : ''}` : 'À jour'} · {app.git.remote ? host(app.git.remote) : 'local'}
       </span>
+      <Popover.Root bind:open={remoteOpen} onOpenChange={(o) => o && (remoteUrl = app.git?.remote ?? '')}>
+        <Popover.Trigger>
+          {#snippet child({ props })}
+            <Tip {...props} class="icon-btn" label={app.git?.remote ?? 'Dépôt distant'}><Link size={14} strokeWidth={1.5} /></Tip>
+          {/snippet}
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content class="menu remote" side="top" sideOffset={6} collisionPadding={8}>
+            <form onsubmit={(e) => { e.preventDefault(); saveRemote(remoteUrl) }}>
+              <label for="remote-url">Dépôt distant</label>
+              <input id="remote-url" bind:value={remoteUrl} placeholder="URL du dépôt" spellcheck="false" autocomplete="off" />
+              <div class="row">
+                {#if app.git?.remote}<button type="button" onclick={() => saveRemote('')}>Retirer</button>{/if}
+                <button type="submit" class="primary" disabled={!remoteUrl.trim()}>Enregistrer</button>
+              </div>
+            </form>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
       <Tip class={app.syncing ? 'icon-btn spin' : 'icon-btn'} label="Synchroniser (commit + push)" disabled={app.syncing} onclick={sync}>
         <RefreshCw size={14} strokeWidth={1.5} />
       </Tip>
@@ -147,6 +176,23 @@
   }
   .git .label { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .git .link:hover { color: var(--orange); }
+  :global(.remote) { width: 300px; padding: 10px; }
+  :global(.remote label) { display: block; margin-bottom: 6px; font: 600 12.5px/1.2 var(--display); color: var(--fg); }
+  :global(.remote input) {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    background: var(--bg);
+    color: var(--fg);
+    font: 12.5px/1.4 var(--mono);
+  }
+  :global(.remote input:focus) { outline: none; border-color: var(--orange); }
+  :global(.remote .row) { margin-top: 8px; display: flex; justify-content: flex-end; gap: 6px; }
+  :global(.remote button) { padding: 6px 10px; border-radius: var(--r); font: 600 12.5px/1 var(--display); color: var(--muted); }
+  :global(.remote button:hover) { background: var(--hover); }
+  :global(.remote .primary) { background: var(--orange); color: #fff; }
+  :global(.remote .primary:disabled) { opacity: 0.5; }
   :global(.spin svg) { animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
