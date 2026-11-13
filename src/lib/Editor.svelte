@@ -25,7 +25,7 @@
   let section: HTMLElement
   let page: HTMLElement
   let caretEl = $state<HTMLElement>()
-  let caret = $state<{ x: number; y: number; h: number } | null>(null)
+  let caret = $state<{ x: number; y: number; h: number; typing: boolean } | null>(null)
 
   const INLINE = ['bold', 'italic', 'strike', 'code']
   /** One inline style at a time: switching to another drops the current one. */
@@ -116,11 +116,12 @@
   }
 
   // Word-style caret: our own bar that glides to its new spot (the native one jumps), blinking softly
-  function moveCaret() {
+  // typing moves it instantly (a glide would trail behind fast typing); clicks, arrows and jumps glide
+  function moveCaret(typing = false) {
     const sel = editor?.state.selection
     if (!editor || !sel?.empty || !editor.isFocused) return void (caret = null)
     const c = editor.view.coordsAtPos(sel.head), box = page.getBoundingClientRect()
-    caret = { x: c.left - box.left, y: c.top - box.top, h: c.bottom - c.top }
+    caret = { x: c.left - box.left, y: c.top - box.top, h: c.bottom - c.top, typing }
     // restart the blink so the caret stays solid while typing
     caretEl?.getAnimations().forEach((a) => (a.currentTime = 0))
   }
@@ -165,11 +166,11 @@
       extensions: [...extensions, Markdown, keys],
       content: body,
       contentType: 'markdown',
-      onTransaction: () => {
+      onTransaction: ({ transaction }) => {
         const a = tools.filter((t) => t?.active()).map((t) => t!.key)
         if (a.join() !== on.join()) on = a
         place()
-        moveCaret()
+        moveCaret(transaction.docChanged)
       },
       onFocus: () => (place(), moveCaret()),
       onBlur: () => (place(), moveCaret()),
@@ -307,7 +308,7 @@
     {/if}
     <div bind:this={host}></div>
     {#if caret}
-      <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px"></div>
+      <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px" style:transition={caret.typing ? 'none' : null}></div>
     {/if}
     </div>
   </div>
