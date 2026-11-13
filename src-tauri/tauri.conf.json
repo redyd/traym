@@ -22,7 +22,7 @@
         "backgroundColor": "#2b1a0e"
       }
     ],
-    "security": { "csp": null }
+    "security": { "csp": null, "assetProtocol": { "enable": true, "scope": [] } }
   },
   "bundle": { "active": true, "targets": "all", "icon": ["icons/icon.png"] }
 }

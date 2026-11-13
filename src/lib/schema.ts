@@ -5,12 +5,21 @@ import { TableKit } from '@tiptap/extension-table'
 import Image from '@tiptap/extension-image'
 import { MarkdownManager } from '@tiptap/markdown'
 
+/** How the editor turns an image's markdown src into a URL the webview can load (set per note). */
+export const media = { resolve: (src: string) => src }
+
+const Img = Image.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ['img', { ...HTMLAttributes, src: media.resolve(HTMLAttributes.src ?? '') }]
+  },
+})
+
 export const extensions = [
   StarterKit.configure({ link: { openOnClick: false }, underline: false }),
   TaskList,
   TaskItem.configure({ nested: true }),
-  TableKit,
-  Image,
+  TableKit.configure({ table: { resizable: false } }),
+  Img,
 ]
 
 /** Frontmatter isn't editable content: kept verbatim around the editor. */

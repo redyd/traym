@@ -52,8 +52,30 @@ fn open_vault(core: C, path: String) -> Res<Vec<Node>> {
     .map_err(|e| e.to_string())?;
     w.watch(&root, RecursiveMode::Recursive).map_err(|e| e.to_string())?;
     *core.watcher.lock().unwrap() = Some(w);
+    // the webview may show images from this vault (and only this one) through the asset protocol
+    core.app.asset_protocol_scope().allow_directory(&root, true).map_err(|e| e.to_string())?;
     *core.vault.write().unwrap() = Some(root);
     Ok(tree)
+}
+
+/// Copy a file picked outside the vault into `dir` (vault-relative), next to the note that embeds it.
+/// Returns its vault-relative path, renamed `name-1.ext`… if the name is taken.
+#[tauri::command]
+fn import_file(core: C, src: String, dir: String) -> Res<String> {
+    let root = core.vault()?;
+    let from = PathBuf::from(&src);
+    let stem = from.file_stem().ok_or("fichier invalide")?.to_string_lossy().to_string();
+    let ext = from.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    for i in 0.. {
+        let name = if i == 0 { format!("{stem}{ext}") } else { format!("{stem}-{i}{ext}") };
+        let rel = if dir.is_empty() { name } else { format!("{dir}/{name}") };
+        let to = vault::resolve(&root, &rel)?;
+        if !to.exists() {
+            std::fs::copy(&from, &to).map_err(|e| e.to_string())?;
+            return Ok(rel);
+        }
+    }
+    unreachable!()
 }
 
 #[tauri::command]
@@ -134,7 +156,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            open_vault, tree, read_note, write_note, create_note, create_folder, move_path, trash_path, git_status, git_init, git_sync, agent_send, agent_stop
+            open_vault, import_file, tree, read_note, write_note, create_note, create_folder, move_path, trash_path, git_status, git_init, git_sync, agent_send, agent_stop
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de traym");

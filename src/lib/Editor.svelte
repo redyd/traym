@@ -2,8 +2,13 @@
   import { onMount } from 'svelte'
   import { Editor, Extension } from '@tiptap/core'
   import { Markdown } from '@tiptap/markdown'
-  import { Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks } from '@lucide/svelte'
-  import { extensions, split } from './schema'
+  import { convertFileSrc } from '@tauri-apps/api/core'
+  import { open } from '@tauri-apps/plugin-dialog'
+  import {
+    Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
+    Table, Image, BetweenHorizontalEnd, BetweenVerticalEnd, Trash2,
+  } from '@lucide/svelte'
+  import { extensions, split, media } from './schema'
   import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists } from './store.svelte'
 
   let host: HTMLDivElement
@@ -18,6 +23,9 @@
   let status = $state<'saved' | 'saving'>('saved')
   let ember = $state(0)
   let section: HTMLElement
+  let page: HTMLElement
+  let caretEl = $state<HTMLElement>()
+  let caret = $state<{ x: number; y: number; h: number } | null>(null)
 
   const INLINE = ['bold', 'italic', 'strike', 'code']
   /** One inline style at a time: switching to another drops the current one. */
@@ -79,7 +87,43 @@
     { key: 'quote', label: 'Citation', icon: TextQuote, run: () => cmd().toggleBlockquote().run(), active: is('blockquote') },
     { key: 'list', label: 'Liste', icon: List, run: () => cmd().toggleBulletList().run(), active: is('bulletList') },
     { key: 'task', label: 'Tâches', icon: ListChecks, run: () => cmd().toggleTaskList().run(), active: is('taskList') },
+    null,
+    { key: 'table', label: 'Tableau', icon: Table, run: () => cmd().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: is('table') },
+    { key: 'image', label: 'Image', icon: Image, run: () => image(), active: is('image') },
   ]
+  // only while the caret is in a table
+  const tableTools: Tool[] = [
+    { key: 'row', label: 'Ajouter une ligne', icon: BetweenHorizontalEnd, run: () => cmd().addRowAfter().run(), active: () => false },
+    { key: 'col', label: 'Ajouter une colonne', icon: BetweenVerticalEnd, run: () => cmd().addColumnAfter().run(), active: () => false },
+    { key: 'deltable', label: 'Supprimer le tableau', icon: Trash2, run: () => cmd().deleteTable().run(), active: () => false },
+  ]
+
+  // vault-relative path of `to`, written relative to the note's folder `dir`
+  function relTo(dir: string, to: string) {
+    const a = dir ? dir.split('/') : [], b = to.split('/')
+    let i = 0
+    while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++
+    return [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/')
+  }
+
+  /** Pick an image; one from outside the vault is copied next to the note first. */
+  async function image() {
+    const file = await open({ filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'] }] })
+    if (typeof file !== 'string' || !path || !app.vault) return
+    const dir = parent(path)
+    const rel = file.startsWith(app.vault + '/') ? file.slice(app.vault.length + 1) : await call<string>('import_file', { src: file, dir })
+    cmd().setImage({ src: encodeURI(relTo(dir, rel)), alt: rel.split('/').pop()!.replace(/\.\w+$/, '') }).run()
+  }
+
+  // Word-style caret: our own bar that glides to its new spot (the native one jumps), blinking softly
+  function moveCaret() {
+    const sel = editor?.state.selection
+    if (!editor || !sel?.empty || !editor.isFocused) return void (caret = null)
+    const c = editor.view.coordsAtPos(sel.head), box = page.getBoundingClientRect()
+    caret = { x: c.left - box.left, y: c.top - box.top, h: c.bottom - c.top }
+    // restart the blink so the caret stays solid while typing
+    caretEl?.getAnimations().forEach((a) => (a.currentTime = 0))
+  }
   let bar = $state<{ x: number; y: number } | null>(null)
   let on = $state<string[]>([])
   let dragging = false
@@ -125,9 +169,10 @@
         const a = tools.filter((t) => t?.active()).map((t) => t!.key)
         if (a.join() !== on.join()) on = a
         place()
+        moveCaret()
       },
-      onFocus: place,
-      onBlur: place,
+      onFocus: () => (place(), moveCaret()),
+      onBlur: () => (place(), moveCaret()),
       onUpdate: ({ editor: e }) => {
         words = count(e.getText())
         status = 'saving'
@@ -148,6 +193,14 @@
     if (path !== next) return
     const [f, body] = split(disk)
     front = f
+    // images are written relative to the note; the webview reads them through Tauri's asset protocol
+    const base = `${app.vault}/${parent(next)}`.replace(/\/$/, '')
+    media.resolve = (src) => {
+      if (/^[a-z][\w+.-]*:/i.test(src)) return src
+      let p = src
+      try { p = decodeURI(src) } catch {}
+      return convertFileSrc(p.startsWith('/') ? p : `${base}/${p}`)
+    }
     make(body)
     status = 'saved'
     scroller?.scrollTo({ top: 0 })
@@ -183,6 +236,9 @@
     const up = () => { if (dragging) { dragging = false; requestAnimationFrame(place) } }
     host.addEventListener('pointerdown', down)
     window.addEventListener('pointerup', up)
+    // reflow (window resize, images loading) moves text under a still caret
+    const ro = new ResizeObserver(() => moveCaret())
+    ro.observe(host)
     const un = onDiskChange(async (paths) => {
       if (!path || !editor || !paths.includes(path)) return
       const disk = await call<string>('read_note', { path }).catch(() => null)
@@ -199,6 +255,7 @@
     })
     return () => {
       window.removeEventListener('pointerup', up)
+      ro.disconnect()
       save()
       un.then((f) => f())
       editor?.destroy()
@@ -214,6 +271,12 @@
       <span class="sep"></span>
     {/if}
   {/each}
+  {#if on.includes('table')}
+    <span class="sep"></span>
+    {#each tableTools as t}
+      <button class="icon-btn" title={t.label} aria-label={t.label} onclick={() => t.run()}><t.icon size={15} strokeWidth={1.6} /></button>
+    {/each}
+  {/if}
 {/snippet}
 
 <section class="editor" class:empty={!app.current} bind:this={section}>
@@ -227,7 +290,7 @@
     {#if ember}<div class="ember"></div>{/if}
   {/key}
   <div class="scroll" bind:this={scroller} onscroll={place}>
-    <div class="page">
+    <div class="page" bind:this={page}>
     {#if app.current}
       <input
         class="title"
@@ -243,6 +306,9 @@
       />
     {/if}
     <div bind:this={host}></div>
+    {#if caret}
+      <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px"></div>
+    {/if}
     </div>
   </div>
 
@@ -301,7 +367,20 @@
   }
   .title:focus-visible { outline: none; }
 
-  .page { max-width: 700px; margin: 0 auto; }
+  .page { position: relative; max-width: 700px; margin: 0 auto; }
+
+  .caret {
+    position: absolute;
+    left: -1px;
+    top: 0;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--orange);
+    pointer-events: none;
+    transition: transform 90ms var(--ease), height 90ms var(--ease);
+    animation: blink 1.1s ease-in-out 0.5s infinite;
+  }
+  @keyframes blink { 0%, 40% { opacity: 1; } 55%, 85% { opacity: 0; } 100% { opacity: 1; } }
 
   /* the one loud moment: a line of ember when an agent rewrites the open note */
   .ember {
@@ -382,7 +461,7 @@
     outline: none;
     font: 400 16.5px/1.72 var(--text);
     color: var(--fg);
-    caret-color: var(--orange);
+    caret-color: transparent; /* drawn by .caret */
   }
   :global(.tiptap ::selection) { background: var(--select); }
   :global(.tiptap > *) { margin: 0 0 0.55em; }
