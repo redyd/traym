@@ -28,12 +28,16 @@ fn find_cli(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-fn args(agent: &str, mcp: &str, session: Option<&str>) -> Vec<String> {
+fn args(agent: &str, mcp: &str, session: Option<&str>, model: Option<&str>) -> Vec<String> {
     let mut a: Vec<String> = vec![];
+    let model = model.filter(|m| !m.is_empty() && *m != "default");
     if agent == "codex" {
         a.push("exec".into());
         if let Some(s) = session {
             a.extend(["resume".into(), s.into()]);
+        }
+        if let Some(m) = model {
+            a.extend(["-c".into(), format!("model={}", json!(m))]);
         }
         for c in [
             "sandbox_mode=\"read-only\"".to_string(),
@@ -53,6 +57,9 @@ fn args(agent: &str, mcp: &str, session: Option<&str>) -> Vec<String> {
         a.extend(["--append-system-prompt".into(), BRIEF.into()]);
         if let Some(s) = session {
             a.extend(["--resume".into(), s.into()]);
+        }
+        if let Some(m) = model {
+            a.extend(["--model".into(), m.into()]);
         }
     }
     a
@@ -98,21 +105,89 @@ fn read(line: &Value) -> Vec<Value> {
     out
 }
 
-pub async fn send(core: Arc<Core>, agent: String, prompt: String, session: Option<String>) -> Result<(), String> {
+/// Which CLIs are installed, so the UI can grey out the others.
+pub fn available() -> Value {
+    json!({ "claude": find_cli("claude").is_some(), "codex": find_cli("codex").is_some() })
+}
+
+/// The CLI with its own directory on PATH (it may spawn node etc. from there).
+fn cli(agent: &str) -> Result<(&'static str, Command), String> {
     let name = if agent == "codex" { "codex" } else { "claude" };
     let exe = find_cli(name).ok_or_else(|| format!("`{name}` introuvable — installe-le ou ajoute-le au PATH"))?;
     let path = std::env::join_paths(exe.parent().into_iter().map(PathBuf::from).chain(
         std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default(),
     ))
     .map_err(|e| e.to_string())?;
-    let mut child = Command::new(&exe)
-        .args(args(name, &core.mcp_url, session.as_deref()))
+    let mut cmd = Command::new(&exe);
+    cmd.env("PATH", path).kill_on_drop(true);
+    Ok((name, cmd))
+}
+
+/// Ask the CLI itself which models it offers: Claude answers the stream-json `initialize`
+/// control request, Codex answers `model/list` on its app-server. -> [{ id, name, default }]
+pub async fn models(agent: String) -> Result<Vec<Value>, String> {
+    let (name, mut cmd) = cli(&agent)?;
+    let codex = name == "codex";
+    let (argv, req): (&[&str], String) = if codex {
+        let msgs = [
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "traym", "version": "0.1" } } }),
+            json!({ "jsonrpc": "2.0", "method": "initialized" }),
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "model/list", "params": {} }),
+        ];
+        (&["app-server"], msgs.map(|m| m.to_string() + "\n").concat())
+    } else {
+        let a = &["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--setting-sources", ""];
+        (a, json!({ "type": "control_request", "request_id": "models", "request": { "subtype": "initialize" } }).to_string() + "\n")
+    };
+    let mut child = cmd
+        .args(argv)
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let mut stdin = child.stdin.take().unwrap(); // kept open: both exit on EOF before answering
+    stdin.write_all(req.as_bytes()).await.map_err(|e| e.to_string())?;
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let found = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while let Ok(Some(l)) = lines.next_line().await {
+            let v: Value = serde_json::from_str(&l).unwrap_or_default();
+            if codex && v["id"] == 2 {
+                return v["result"]["data"].as_array().cloned();
+            }
+            if !codex && v["type"] == "control_response" {
+                return v["response"]["response"]["models"].as_array().cloned();
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or_else(|| format!("`{name}` n'a pas donné sa liste de modèles"))?;
+    Ok(found.iter().filter(|m| m["hidden"] != true).map(|m| model(codex, m)).collect())
+}
+
+/// `light`: the cheap, quick model traym picks until the user chooses (Haiku; for Codex, whatever calls itself fast/mini).
+fn model(codex: bool, m: &Value) -> Value {
+    let words = format!("{} {} {}", m["model"], m["value"], m["description"]).to_lowercase();
+    let light = if codex { ["fast", "mini", "light", "efficient"].iter().any(|w| words.contains(w)) } else { m["value"] == "haiku" };
+    if codex {
+        json!({ "id": m["model"], "name": m["displayName"], "default": m["isDefault"] == true, "light": light })
+    } else {
+        json!({ "id": m["value"], "name": m["displayName"], "default": m["value"] == "default", "light": light })
+    }
+}
+
+pub async fn send(core: Arc<Core>, agent: String, prompt: String, session: Option<String>, model: Option<String>) -> Result<(), String> {
+    let (name, mut cmd) = cli(&agent)?;
+    let mut child = cmd
+        .args(args(name, &core.mcp_url, session.as_deref(), model.as_deref()))
         .current_dir(core.vault()?)
-        .env("PATH", path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
         .spawn()
         .map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().unwrap();
@@ -167,5 +242,19 @@ mod tests {
         let codex = json!({"type":"item.completed","item":{"type":"agent_message","text":"ok"}});
         assert_eq!(read(&codex), vec![json!({"type":"message","text":"ok"})]);
         assert_eq!(read(&json!({"type":"thread.started","thread_id":"t"})), vec![json!({"type":"session","id":"t"})]);
+    }
+
+    #[test]
+    fn model_flags() {
+        let has = |a: &[String], s: &str| a.iter().any(|x| x == s);
+        assert!(has(&args("claude", "u", None, Some("opus")), "opus"));
+        assert!(!has(&args("claude", "u", None, Some("default")), "--model"));
+        assert!(has(&args("codex", "u", Some("t"), Some("gpt-x")), "model=\"gpt-x\""));
+        let c = json!({"value":"default","displayName":"Default"});
+        assert_eq!(model(false, &c), json!({"id":"default","name":"Default","default":true,"light":false}));
+        assert_eq!(model(false, &json!({"value":"haiku"}))["light"], true);
+        let x = json!({"model":"gpt-x","displayName":"GPT X","isDefault":true,"description":"Balanced model."});
+        assert_eq!(model(true, &x), json!({"id":"gpt-x","name":"GPT X","default":true,"light":false}));
+        assert_eq!(model(true, &json!({"model":"gpt-y","description":"Older fast and efficient model."}))["light"], true);
     }
 }

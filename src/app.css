@@ -81,8 +81,7 @@ input, textarea {
   cursor: text;
 }
 
-.cm-content { cursor: text; }
-.cm-task, .cm-link { cursor: pointer; }
+.tiptap { cursor: text; }
 [role='treeitem'], [role='option'] { cursor: pointer; }
 
 :focus { outline: none; }
@@ -179,3 +178,6 @@ kbd {
     animation-duration: 0ms !important;
   }
 }
+.menu .note { padding: 5px 8px; font-size: 12px; color: var(--faint); max-width: 260px; }
+.menu [role='menuitem'][data-disabled] { opacity: 0.45; cursor: default; }
+.menu .missing { margin-left: auto; padding-left: 12px; font-size: 11px; color: var(--faint); }

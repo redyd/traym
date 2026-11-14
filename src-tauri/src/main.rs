@@ -185,8 +185,18 @@ async fn git_abort(core: C<'_>) -> Res<()> {
 }
 
 #[tauri::command]
-async fn agent_send(core: C<'_>, agent: String, prompt: String, session: Option<String>) -> Res<()> {
-    agent::send(core.inner().clone(), agent, prompt, session).await
+async fn agent_send(core: C<'_>, agent: String, prompt: String, session: Option<String>, model: Option<String>) -> Res<()> {
+    agent::send(core.inner().clone(), agent, prompt, session, model).await
+}
+
+#[tauri::command]
+fn agent_available() -> serde_json::Value {
+    agent::available()
+}
+
+#[tauri::command]
+async fn agent_models(agent: String) -> Res<Vec<serde_json::Value>> {
+    agent::models(agent).await
 }
 
 #[tauri::command]
@@ -212,7 +222,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            open_vault, import_file, save_file, tree, read_note, write_note, create_note, create_folder, move_path, trash_path, git_status, git_init, git_sync, git_set_remote, git_pull, git_resolve, git_abort, agent_send, agent_stop
+            open_vault, import_file, save_file, tree, read_note, write_note, create_note, create_folder, move_path, trash_path, git_status, git_init, git_sync, git_set_remote, git_pull, git_resolve, git_abort, agent_send, agent_stop, agent_models, agent_available
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de traym");

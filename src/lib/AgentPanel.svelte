@@ -1,16 +1,30 @@
 <script lang="ts">
   import Tip from './Tip.svelte'
+  import { DropdownMenu } from 'bits-ui'
   import { onMount, tick } from 'svelte'
   import { listen } from '@tauri-apps/api/event'
+  import { invoke } from '@tauri-apps/api/core'
   import { marked } from 'marked'
   import DOMPurify from 'dompurify'
-  import { ArrowUp, Square, SquarePen, FilePen, FileText, FolderPlus, Search, Trash2, MoveRight, List } from '@lucide/svelte'
-  import { app, call, pulse, reveal, title, flat } from './store.svelte'
+  import { ArrowUp, Square, SquarePen, FilePen, FileText, FolderPlus, Search, Trash2, MoveRight, List, ChevronDown, Check, Folder, ClipboardPaste, X } from '@lucide/svelte'
+  import { app, call, pulse, reveal, title, flat, type Node } from './store.svelte'
 
-  type Line = { role: 'user' | 'ai' | 'action' | 'error'; text: string; open?: boolean; path?: string | null; tool?: string }
+  type Agent = 'claude' | 'codex'
+  type Model = { id: string; name: string; default: boolean; light: boolean }
+  // attached to the next message: a mentioned file/folder, or a long paste kept out of the textarea
+  type Att = { kind: 'file' | 'dir'; path: string } | { kind: 'text'; text: string }
+  type Line = { role: 'user' | 'ai' | 'action' | 'error'; text: string; open?: boolean; path?: string | null; tool?: string; atts?: Att[] }
 
   const ls = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
-  let agent = $state<'claude' | 'codex'>(ls('agent') === 'codex' ? 'codex' : 'claude')
+  let agent = $state<Agent>(ls('agent') === 'codex' ? 'codex' : 'claude')
+  // chosen model per CLI, with its name so the picker reads right before the lists arrive
+  let chosen = $state<Record<Agent, { id: string; name: string } | null>>(JSON.parse(ls('models') ?? '{"claude":null,"codex":null}'))
+  let models = $state<Record<Agent, Model[] | string | null>>({ claude: null, codex: null }) // string = error
+  let found = $state<Record<Agent, boolean>>({ claude: true, codex: true }) // until the backend says otherwise
+  const none = $derived(!found.claude && !found.codex)
+  let atts = $state<Att[]>([])
+  let mention = $state<{ start: number; q: string } | null>(null)
+  let hi = $state(0)
   let lines = $state<Line[]>([])
   let session: string | null = null
   let running = $state(false)
@@ -19,6 +33,68 @@
   let box: HTMLTextAreaElement
 
   const label = $derived(agent === 'codex' ? 'Codex' : 'Claude')
+  const names: Record<Agent, string> = { claude: 'Claude', codex: 'Codex' }
+  // the user's pick, else a light model (cheap and quick for note chores), else the CLI's own default
+  const current = (a: Agent) => {
+    const m = models[a]
+    return chosen[a] ?? (Array.isArray(m) ? (m.find((x) => x.light) ?? m.find((x) => x.default)) : null) ?? null
+  }
+
+  function loadModels(a: Agent) {
+    if (!found[a] || Array.isArray(models[a])) return
+    models[a] = null
+    invoke<Model[]>('agent_models', { agent: a }).then((m) => (models[a] = m), (e) => (models[a] = String(e)))
+  }
+
+  function choose(m: Model) {
+    chosen[agent] = { id: m.id, name: m.name }
+    try { localStorage.setItem('models', JSON.stringify(chosen)) } catch {}
+  }
+
+  // every note and folder, for @ mentions
+  const everything = (nodes: Node[] = app.tree): Node[] => nodes.flatMap((n) => [n, ...(n.dir ? everything(n.children) : [])])
+  const hits = $derived.by(() => {
+    if (!mention) return []
+    const q = mention.q.toLowerCase()
+    return everything().filter((n) => n.path.toLowerCase().includes(q)).slice(0, 8)
+  })
+
+  // an @ at a word start, up to the caret, opens the list
+  function seek() {
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(input.slice(0, box.selectionStart))
+    mention = m ? { start: box.selectionStart - m[1].length - 1, q: m[1] } : null
+    hi = 0
+  }
+
+  function attach(n: Node) {
+    if (!mention) return
+    const end = mention.start + 1 + mention.q.length
+    input = input.slice(0, mention.start) + input.slice(end)
+    if (!atts.some((a) => a.kind !== 'text' && a.path === n.path)) atts.push({ kind: n.dir ? 'dir' : 'file', path: n.path })
+    const at = mention.start
+    mention = null
+    tick().then(() => { box.setSelectionRange(at, at); grow() })
+  }
+
+  const LONG = 800
+  function paste(e: ClipboardEvent) {
+    const t = e.clipboardData?.getData('text/plain') ?? ''
+    if (t.length < LONG && t.split('\n').length < 12) return
+    e.preventDefault()
+    atts.push({ kind: 'text', text: t })
+  }
+
+  const lineCount = (t: string) => t.split('\n').length
+  const attName = (a: Att) => (a.kind === 'text' ? `Texte collé · ${lineCount(a.text)} lignes` : a.kind === 'dir' ? a.path + '/' : title(a.path))
+
+  function context(list: Att[]) {
+    let ctx = ''
+    const refs = list.flatMap((a) => (a.kind === 'text' ? [] : [a.kind === 'dir' ? a.path + '/' : a.path]))
+    if (refs.length) ctx += `\n\n[Mentionnés par l'utilisateur (lis-les avec les outils traym) : ${refs.join(', ')}]`
+    list.flatMap((a) => (a.kind === 'text' ? [a.text] : [])).forEach((t, i) => (ctx += `\n\n<texte_colle n="${i + 1}">\n${t}\n</texte_colle>`))
+    if (app.current) ctx += `\n\n[Note ouverte dans traym : ${app.current}]`
+    return ctx
+  }
   const last = () => lines[lines.length - 1]
   const close = () => { const l = last(); if (l?.role === 'ai') l.open = false }
 
@@ -46,14 +122,16 @@
   }
 
   async function send(text = input.trim()) {
-    if (!text || running) return
+    if ((!text && !atts.length) || running || none) return
+    const sent = atts
     input = ''
-    lines.push({ role: 'user', text })
+    atts = []
+    mention = null
+    lines.push({ role: 'user', text, atts: sent })
     running = true
     scroll()
-    const ctx = app.current ? `\n\n[Note ouverte dans traym : ${app.current}]` : ''
     try {
-      await call('agent_send', { agent, prompt: text + ctx, session })
+      await call('agent_send', { agent, prompt: text + context(sent), session, model: current(agent)?.id ?? null })
     } catch (e) {
       lines.push({ role: 'error', text: String(e) })
     }
@@ -68,14 +146,21 @@
     box?.focus()
   }
 
-  function pick(a: 'claude' | 'codex') {
-    if (running || a === agent) return
+  function pick(a: Agent) {
+    if (running || a === agent || !found[a]) return
     agent = a
     try { localStorage.setItem('agent', a) } catch {}
+    loadModels(a)
     reset() // sessions don't carry across CLIs
   }
 
   onMount(() => {
+    invoke<Record<Agent, boolean>>('agent_available').then((f) => {
+      found = f
+      const other: Agent = agent === 'claude' ? 'codex' : 'claude'
+      if (!f[agent] && f[other]) pick(other)
+      loadModels(agent) // the light default needs the list to be named
+    })
     const a = listen<any>('agent://event', ({ payload: e }) => {
       const l = last()
       switch (e.type) {
@@ -108,6 +193,20 @@
     if (app.agent) box?.focus()
   })
 
+  function keys(e: KeyboardEvent) {
+    if (hits.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        hi = (hi + (e.key === 'ArrowDown' ? 1 : hits.length - 1)) % hits.length
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); attach(hits[hi]); return }
+    }
+    if (e.key === 'Escape' && mention) { e.preventDefault(); mention = null; return }
+    if (e.key === 'Backspace' && !input && atts.length) { atts.pop(); return }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); requestAnimationFrame(grow) }
+  }
+
   function grow() {
     box.style.height = 'auto'
     box.style.height = Math.min(box.scrollHeight, 200) + 'px'
@@ -118,26 +217,33 @@
 
 <aside class="agent">
   <header>
-    <div class="seg" role="tablist" aria-label="Agent">
-      <button role="tab" aria-selected={agent === 'claude'} onclick={() => pick('claude')}>Claude</button>
-      <button role="tab" aria-selected={agent === 'codex'} onclick={() => pick('codex')}>Codex</button>
-    </div>
     <Tip class="icon-btn" label="Nouvelle conversation" disabled={running} onclick={reset}><SquarePen size={15} strokeWidth={1.5} /></Tip>
   </header>
 
   <div class="lines" bind:this={list}>
     {#if !lines.length}
       <div class="intro">
-        <p>{label} lit, écrit et range vos notes directement dans ce vault.</p>
-        {#each examples as ex}
-          <button onclick={() => send(ex)}>{ex}</button>
-        {/each}
+        {#if none}
+          <p>Aucun agent trouvé. Installe <strong>Claude Code</strong> (<code>claude</code>) ou <strong>Codex</strong> (<code>codex</code>), puis rouvre traym.</p>
+        {:else}
+          <p>{label} lit, écrit et range vos notes directement dans ce vault.</p>
+          {#each examples as ex}
+            <button onclick={() => send(ex)}>{ex}</button>
+          {/each}
+        {/if}
       </div>
     {/if}
 
     {#each lines as l, i (i)}
       {#if l.role === 'user'}
-        <div class="user">{l.text}</div>
+        <div class="user">
+          {#if l.atts?.length}
+            <div class="chips">
+              {#each l.atts as a}<span class="chip" title={a.kind === 'text' ? a.text.slice(0, 300) : a.path}>{attName(a)}</span>{/each}
+            </div>
+          {/if}
+          {#if l.text}{l.text}{/if}
+        </div>
       {:else if l.role === 'ai'}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div class="ai" class:open={l.open} onclick={(e) => (e.target as HTMLElement).closest('a') && e.preventDefault()}>
@@ -162,22 +268,100 @@
   </div>
 
   <form class="composer" onsubmit={(e) => { e.preventDefault(); send() }}>
+    {#if hits.length}
+      <div class="mentions" id="mentions" role="listbox" aria-label="Notes et dossiers">
+        {#each hits as n, i (n.path)}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <div
+            id="mention-{i}"
+            role="option"
+            tabindex="-1"
+            aria-selected={i === hi}
+            onmousedown={(e) => e.preventDefault()}
+            onmouseenter={() => (hi = i)}
+            onclick={() => attach(n)}
+          >
+            {#if n.dir}<Folder size={13} strokeWidth={1.75} />{:else}<FileText size={13} strokeWidth={1.75} />{/if}
+            <span>{n.dir ? n.name : title(n.path)}</span>
+            {#if n.path.includes('/')}<small>{n.path.split('/').slice(0, -1).join('/')}</small>{/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+    {#if atts.length || app.current}
+      <div class="chips">
+        {#if app.current}
+          <span class="chip ctx" title="Note ouverte, jointe automatiquement"><FileText size={12} strokeWidth={1.75} />{title(app.current)}</span>
+        {/if}
+        {#each atts as a, i}
+          {@const Icon = a.kind === 'text' ? ClipboardPaste : a.kind === 'dir' ? Folder : FileText}
+          <span class="chip" title={a.kind === 'text' ? a.text.slice(0, 300) : a.path}>
+            <Icon size={12} strokeWidth={1.75} />{attName(a)}
+            <button type="button" aria-label="Retirer {attName(a)}" onclick={() => { atts.splice(i, 1); box.focus() }}><X size={11} strokeWidth={2} /></button>
+          </span>
+        {/each}
+      </div>
+    {/if}
     <textarea
       bind:this={box}
       bind:value={input}
       rows="1"
-      placeholder="Demander à {label}"
-      oninput={grow}
-      onkeydown={(e) => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); requestAnimationFrame(grow) }
-      }}
+      placeholder={none ? 'Installe Claude Code ou Codex pour discuter' : `Demander à ${label} — @ pour joindre une note`}
+      disabled={none}
+      role="combobox"
+      aria-expanded={hits.length > 0}
+      aria-controls="mentions"
+      aria-autocomplete="list"
+      aria-activedescendant={hits.length ? `mention-${hi}` : undefined}
+      oninput={() => { grow(); seek() }}
+      onclick={seek}
+      onblur={() => (mention = null)}
+      onpaste={paste}
+      onkeydown={keys}
     ></textarea>
     <div class="bar">
-      <span class="ctx">{app.current ? title(app.current) : 'Aucune note ouverte'}</span>
+      <div class="pickers">
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger class="picker agent-pick" disabled={running || none} aria-label="Agent : {names[agent]}">
+            {names[agent]}<ChevronDown size={12} strokeWidth={1.75} />
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content class="menu" side="top" align="start" sideOffset={6} collisionPadding={8} onCloseAutoFocus={(e) => { e.preventDefault(); box.focus() }}>
+              {#each ['claude', 'codex'] as const as a}
+                <DropdownMenu.Item disabled={!found[a]} onSelect={() => pick(a)}>
+                  <Check size={13} strokeWidth={2} style="visibility: {agent === a ? 'visible' : 'hidden'}" />{names[a]}
+                  {#if !found[a]}<small class="missing">introuvable</small>{/if}
+                </DropdownMenu.Item>
+              {/each}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+        {#if !none}
+          <DropdownMenu.Root onOpenChange={(o) => o && loadModels(agent)}>
+            <DropdownMenu.Trigger class="picker" disabled={running} aria-label="Modèle : {current(agent)?.name ?? 'par défaut'}">
+              <span>{current(agent)?.name ?? (typeof models[agent] === 'string' ? 'Modèle par défaut' : 'Modèle…')}</span><ChevronDown size={12} strokeWidth={1.75} />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content class="menu" side="top" align="start" sideOffset={6} collisionPadding={8} onCloseAutoFocus={(e) => { e.preventDefault(); box.focus() }}>
+                {@const list = models[agent]}
+                {#if Array.isArray(list)}
+                  {#each list as m (m.id)}
+                    <DropdownMenu.Item onSelect={() => choose(m)}>
+                      <Check size={13} strokeWidth={2} style="visibility: {current(agent)?.id === m.id ? 'visible' : 'hidden'}" />{m.name}
+                    </DropdownMenu.Item>
+                  {/each}
+                {:else}
+                  <div class="note">{list ?? 'Chargement des modèles…'}</div>
+                {/if}
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        {/if}
+      </div>
       {#if running}
         <button type="button" class="send stop" title="Arrêter" onclick={() => call('agent_stop')}><Square size={11} fill="currentColor" strokeWidth={0} /></button>
       {:else}
-        <button type="submit" class="send" title="Envoyer" disabled={!input.trim()}><ArrowUp size={15} strokeWidth={2} /></button>
+        <button type="submit" class="send" title="Envoyer" disabled={none || (!input.trim() && !atts.length)}><ArrowUp size={15} strokeWidth={2} /></button>
       {/if}
     </div>
   </form>
@@ -194,25 +378,9 @@
   }
   header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 8px 8px 12px;
+    justify-content: flex-end;
+    padding: 8px 8px 0;
   }
-  .seg {
-    display: flex;
-    padding: 2px;
-    border: 1px solid var(--line-soft);
-    border-radius: var(--r);
-  }
-  .seg button {
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-weight: 600;
-    color: var(--faint);
-    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
-  }
-  .seg button:hover { color: var(--fg); }
-  .seg button[aria-selected='true'] { background: var(--surface); color: var(--fg); }
 
   .lines {
     flex: 1;
@@ -226,6 +394,7 @@
 
   .intro { margin-top: 8px; display: grid; gap: 6px; justify-items: start; }
   .intro p { margin: 0 0 8px; color: var(--muted); font: 14px/1.55 var(--text); }
+  .intro code { font: 0.86em var(--mono); }
   .intro button {
     text-align: left;
     padding: 6px 10px;
@@ -303,6 +472,7 @@
   @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
 
   .composer {
+    position: relative;
     margin: 0 12px 12px;
     padding: 10px 10px 8px 12px;
     background: var(--bg);
@@ -323,7 +493,72 @@
   textarea::placeholder { color: var(--faint); }
   textarea:focus-visible { outline: none; }
   .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
-  .ctx { font-size: 12px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pickers { display: flex; align-items: center; gap: 2px; min-width: 0; margin-left: -5px; }
+  .bar :global(.picker) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--faint);
+    white-space: nowrap;
+    transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+  }
+  .bar :global(.agent-pick) { flex: none; font-weight: 600; }
+  .bar :global(.picker span) { overflow: hidden; text-overflow: ellipsis; }
+  .bar :global(.picker svg) { flex: none; }
+  .bar :global(.picker:not(:disabled):hover), .bar :global(.picker[data-state='open']) { color: var(--fg); background: var(--surface); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .user .chips { margin-bottom: 6px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    padding: 2px 4px 2px 7px;
+    border: 1px solid var(--line-soft);
+    border-radius: 5px;
+    background: var(--surface);
+    font: 12px/1.5 var(--display);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .user .chip { padding-right: 7px; background: var(--bg); }
+  .chip :global(svg) { flex: none; color: var(--orange); }
+  .chip.ctx { padding-right: 7px; border-style: dashed; background: none; color: var(--faint); }
+  .chip button { display: grid; place-items: center; padding: 2px; border-radius: 3px; color: var(--faint); }
+  .chip button:hover { color: var(--fg); background: var(--line-soft); }
+
+  .mentions {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 6px);
+    padding: 4px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+    animation: rise var(--t-fast) var(--ease);
+  }
+  .mentions [role='option'] {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .mentions [role='option'] :global(svg) { flex: none; color: var(--muted); }
+  .mentions [role='option'] small { color: var(--faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+  .mentions [aria-selected='true'] { background: var(--orange-wash); }
   .send {
     display: grid;
     place-items: center;
