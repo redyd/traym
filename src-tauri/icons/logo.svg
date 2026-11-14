@@ -1,9 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="104" fill="#1a1a1a"/>
-  <g fill="#ff5722" transform="translate(0 -18)">
-    <!-- right arm + stem: one piece, beveled ends -->
-    <path d="M240 112 H356 L404 160 V200 H320 V356 L240 436 Z"/>
-    <!-- left arm: a separate blade, its tail running beside the stem -->
-    <path d="M108 160 L156 112 H212 V276 L160 328 V200 H108 Z"/>
-  </g>
+  <defs>
+    <linearGradient id="strip" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffa06a"/><stop offset="1" stop-color="#ff7a3d"/></linearGradient>
+    <linearGradient id="wing" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6a2b"/><stop offset="1" stop-color="#c94a16"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#2a1f1a"/>
+  <!-- a strip of paper folded into a T: the light stem, the wing folding off to the right -->
+  <path d="M232 120 H352 L280 248 L232 248 Z" fill="url(#wing)"/>
+  <path d="M168 120 H280 V392 L232 360 V176 H168 Z" fill="url(#strip)"/>
 </svg>
