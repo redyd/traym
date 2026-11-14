@@ -87,7 +87,7 @@ export async function openVault(path: string) {
   app.current = last && flat().includes(last) ? last : null
   persist()
   await gitStatus()
-  pull()
+  await pull(true) // at startup this runs under index.html's boot screen
 }
 
 export async function refresh() {
@@ -118,11 +118,11 @@ async function busy(fn: () => Promise<unknown>) {
 }
 
 // opening a vault: bring in what was pushed from elsewhere (a conflict locks the vault, see Conflicts.svelte)
-export async function pull() {
-  if (app.git?.remote && !app.git.conflicts.length) await busy(() => call('git_pull')).catch(() => {})
+export async function pull(boot = false) {
+  if (app.git?.remote && !app.git.conflicts.length) await busy(() => call('git_pull', { boot })).catch(() => {})
 }
 
-export const setRemote = (url: string) => busy(() => call('git_set_remote', { url })).then(pull)
+export const setRemote = (url: string) => busy(() => call('git_set_remote', { url })).then(() => pull())
 
 export const resolve = (path: string, side: 'ours' | 'theirs' | 'manual') => busy(() => call('git_resolve', { path, side }))
 

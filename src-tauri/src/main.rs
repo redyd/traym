@@ -204,8 +204,8 @@ async fn git_set_remote(core: C<'_>, url: String) -> Res<()> {
 }
 
 #[tauri::command]
-async fn git_pull(core: C<'_>) -> Res<()> {
-    git::pull(&core.vault()?).await
+async fn git_pull(core: C<'_>, boot: Option<bool>) -> Res<()> {
+    git::pull(&core.vault()?, if boot == Some(true) { 10 } else { 30 }).await
 }
 
 #[tauri::command]

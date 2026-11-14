@@ -34,8 +34,8 @@ async fn git(root: &Path, args: &[&str]) -> Res<String> {
 }
 
 /// Network commands: bounded, so closing the app never waits forever on a dead remote.
-async fn net(root: &Path, args: &[&str]) -> Res<String> {
-    tokio::time::timeout(Duration::from_secs(30), git(root, args))
+async fn net(root: &Path, args: &[&str], secs: u64) -> Res<String> {
+    tokio::time::timeout(Duration::from_secs(secs), git(root, args))
         .await
         .map_err(|_| "the remote is not responding".to_string())?
 }
@@ -108,17 +108,18 @@ pub async fn commit(root: &Path, message: &str) -> Res<()> {
 pub async fn sync(root: &Path, push: bool, message: &str) -> Res<()> {
     commit(root, message).await?;
     if let Some(r) = remote(root).await?.filter(|_| push) {
-        net(root, &["push", "-u", &r, "HEAD"]).await?;
+        net(root, &["push", "-u", &r, "HEAD"], 30).await?;
     }
     Ok(())
 }
 
 /// Merge the remote's copy of the current branch. A conflict is not an error:
 /// it shows up in `status` and locks the vault until resolved.
-pub async fn pull(root: &Path) -> Res<()> {
+/// `secs` bounds the fetch: shorter at startup, where the boot screen waits on it.
+pub async fn pull(root: &Path, secs: u64) -> Res<()> {
     let Some(r) = remote(root).await? else { return Ok(()) };
     commit(root, "").await?;
-    net(root, &["fetch", &r]).await?;
+    net(root, &["fetch", &r], secs).await?;
     let branch = git(root, &["symbolic-ref", "--short", "HEAD"]).await?;
     let theirs = format!("{r}/{}", branch.trim());
     if git(root, &["rev-parse", "--verify", "--quiet", &theirs]).await.is_err() {
@@ -187,7 +188,7 @@ mod tests {
         sync(root, true, "").await.unwrap(); // a deleted note is committed too
         assert_eq!(git(root, &["ls-files"]).await.unwrap(), "");
         assert_eq!(git(root, &["log", "-1", "--format=%s"]).await.unwrap(), "traym: sync\n");
-        pull(root).await.unwrap(); // no remote: nothing to do
+        pull(root, 30).await.unwrap(); // no remote: nothing to do
         let s = status(root).await.unwrap().unwrap();
         assert_eq!((s.changes, s.remote, s.conflicts.len()), (0, None, 0));
     }
@@ -207,7 +208,7 @@ mod tests {
         assert!(set_remote(&a, "--upload-pack=x").await.is_err());
         assert_eq!(status(&a).await.unwrap().unwrap().remote.as_deref(), Some(url));
 
-        pull(&a).await.unwrap(); // empty remote
+        pull(&a, 30).await.unwrap(); // empty remote
         std::fs::write(a.join("a.md"), "base\n").unwrap();
         sync(&a, false, "").await.unwrap(); // save only: committed here, nothing on the remote
         assert!(git(d.path(), &["ls-remote", url]).await.unwrap().trim().is_empty());
@@ -215,7 +216,7 @@ mod tests {
         sync(&a, true, "").await.unwrap();
         assert!(!git(d.path(), &["ls-remote", url]).await.unwrap().trim().is_empty());
 
-        pull(&c).await.unwrap(); // unborn branch picks up the remote
+        pull(&c, 30).await.unwrap(); // unborn branch picks up the remote
         assert_eq!(std::fs::read_to_string(c.join("a.md")).unwrap(), "base\n");
 
         git(d.path(), &["clone", "-q", url, b.to_str().unwrap()]).await.unwrap();
@@ -224,14 +225,14 @@ mod tests {
         sync(&b, true, "").await.unwrap();
 
         std::fs::write(a.join("a.md"), "ours\n").unwrap();
-        pull(&a).await.unwrap();
+        pull(&a, 30).await.unwrap();
         assert_eq!(status(&a).await.unwrap().unwrap().conflicts, ["a.md"]);
         assert!(commit(&a, "").await.is_err());
         assert!(resolve(&a, "a.md", "manual").await.is_err());
 
         abort(&a).await.unwrap();
         assert_eq!(std::fs::read_to_string(a.join("a.md")).unwrap(), "ours\n");
-        pull(&a).await.unwrap();
+        pull(&a, 30).await.unwrap();
         resolve(&a, "a.md", "theirs").await.unwrap();
         let s = status(&a).await.unwrap().unwrap();
         assert_eq!((s.changes, s.conflicts.len()), (0, 0));
