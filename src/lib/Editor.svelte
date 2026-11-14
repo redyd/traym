@@ -5,7 +5,7 @@
   import { BubbleMenu } from '@tiptap/extension-bubble-menu'
   import { FileHandler } from '@tiptap/extension-file-handler'
   import { DropdownMenu, ContextMenu } from 'bits-ui'
-  import { convertFileSrc } from '@tauri-apps/api/core'
+  import { convertFileSrc, invoke } from '@tauri-apps/api/core'
   import { open } from '@tauri-apps/plugin-dialog'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
@@ -399,7 +399,8 @@
     ro.observe(host)
     const un = onDiskChange(async (paths) => {
       if (!path || !editor || !paths.includes(path)) return
-      const disk = await call<string>('read_note', { path }).catch(() => null)
+      // background re-read: a failure (the note just moved or vanished) is not the user's concern
+      const disk = await invoke<string>('read_note', { path }).catch(() => null)
       // only take the disk version when the user has nothing unsaved
       if (disk === null || disk === saved || text() !== saved) return
       const [f, body] = split(disk)

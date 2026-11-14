@@ -243,7 +243,8 @@ export const onDiskChange = (cb: (paths: string[]) => void) =>
       clearTimeout(refreshTimer)
       refreshTimer = window.setTimeout(refresh, 120)
     } else statusTimer = window.setTimeout(gitStatus, 1500)
-    cb(e.payload.map((c) => c.path))
+    // only what is still there: a moved note's old path arrives before the move returns, and re-reading it fails
+    cb(e.payload.filter((c) => c.exists).map((c) => c.path))
   })
 
 export const isMac = navigator.platform.toLowerCase().includes('mac')
