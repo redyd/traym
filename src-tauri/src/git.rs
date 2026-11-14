@@ -48,12 +48,20 @@ async fn conflicts(root: &Path) -> Res<Vec<String>> {
     Ok(git(root, &["diff", "--name-only", "--diff-filter=U"]).await?.lines().map(str::to_string).collect())
 }
 
+/// Only notes are the app's business: other files in the vault are left for the user to commit (or not).
+const NOTES: &str = "*.md"; // a git pathspec: matches in every folder
+
+/// Notes added, edited, moved or deleted since the last commit, one per line.
+async fn note_changes(root: &Path) -> Res<String> {
+    git(root, &["status", "--porcelain", "-uall", "--", NOTES]).await
+}
+
 /// None when the vault is not a git repository.
 pub async fn status(root: &Path) -> Res<Option<Status>> {
     if git(root, &["rev-parse", "--is-inside-work-tree"]).await.is_err() {
         return Ok(None);
     }
-    let changes = git(root, &["status", "--porcelain"]).await?.lines().count();
+    let changes = note_changes(root).await?.lines().count();
     let remote = match remote(root).await? {
         Some(r) => Some(git(root, &["remote", "get-url", &r]).await?.trim().to_string()),
         None => None,
@@ -80,19 +88,20 @@ pub async fn set_remote(root: &Path, url: &str) -> Res<()> {
     .map(drop)
 }
 
-/// Commit everything. Refused mid-conflict: `add -A` would commit the markers.
+/// Commit the notes. Refused mid-conflict: `add` would commit the markers.
 pub async fn commit(root: &Path) -> Res<()> {
     if !conflicts(root).await?.is_empty() {
         return Err("conflicts need resolving".into());
     }
-    git(root, &["add", "-A"]).await?;
-    if !git(root, &["status", "--porcelain"]).await?.is_empty() {
+    // no change, no add: `add` fails on a pathspec that matches nothing (a vault without any note)
+    if !note_changes(root).await?.is_empty() {
+        git(root, &["add", "-A", "--", NOTES]).await?;
         git(root, &["commit", "-m", "traym: sync"]).await?;
     }
     Ok(())
 }
 
-/// Commit everything; with `push`, also send it to the remote when there is one.
+/// Commit the notes; with `push`, also send it to the remote when there is one.
 pub async fn sync(root: &Path, push: bool) -> Res<()> {
     commit(root).await?;
     if let Some(r) = remote(root).await?.filter(|_| push) {
@@ -163,9 +172,16 @@ mod tests {
         assert!(status(root).await.unwrap().is_none());
         init(root).await.unwrap();
         ident(root).await;
-        std::fs::write(root.join("a.md"), "x").unwrap();
+        std::fs::write(root.join("big.rpm"), "x").unwrap(); // not a note: never counted nor committed
+        sync(root, true).await.unwrap(); // nothing to commit, even with no note at all
+        std::fs::create_dir(root.join("New folder")).unwrap();
+        std::fs::write(root.join("New folder/a.md"), "x").unwrap();
         assert_eq!(status(root).await.unwrap().unwrap().changes, 1);
         sync(root, true).await.unwrap();
+        assert_eq!(git(root, &["ls-files"]).await.unwrap(), "New folder/a.md\n");
+        std::fs::remove_file(root.join("New folder/a.md")).unwrap();
+        sync(root, true).await.unwrap(); // a deleted note is committed too
+        assert_eq!(git(root, &["ls-files"]).await.unwrap(), "");
         pull(root).await.unwrap(); // no remote: nothing to do
         let s = status(root).await.unwrap().unwrap();
         assert_eq!((s.changes, s.remote, s.conflicts.len()), (0, None, 0));
