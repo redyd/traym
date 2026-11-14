@@ -92,9 +92,10 @@ pub async fn commit(root: &Path) -> Res<()> {
     Ok(())
 }
 
-pub async fn sync(root: &Path) -> Res<()> {
+/// Commit everything; with `push`, also send it to the remote when there is one.
+pub async fn sync(root: &Path, push: bool) -> Res<()> {
     commit(root).await?;
-    if let Some(r) = remote(root).await? {
+    if let Some(r) = remote(root).await?.filter(|_| push) {
         net(root, &["push", "-u", &r, "HEAD"]).await?;
     }
     Ok(())
@@ -164,7 +165,7 @@ mod tests {
         ident(root).await;
         std::fs::write(root.join("a.md"), "x").unwrap();
         assert_eq!(status(root).await.unwrap().unwrap().changes, 1);
-        sync(root).await.unwrap();
+        sync(root, true).await.unwrap();
         pull(root).await.unwrap(); // no remote: nothing to do
         let s = status(root).await.unwrap().unwrap();
         assert_eq!((s.changes, s.remote, s.conflicts.len()), (0, None, 0));
@@ -187,7 +188,11 @@ mod tests {
 
         pull(&a).await.unwrap(); // empty remote
         std::fs::write(a.join("a.md"), "base\n").unwrap();
-        sync(&a).await.unwrap();
+        sync(&a, false).await.unwrap(); // save only: committed here, nothing on the remote
+        assert!(git(d.path(), &["ls-remote", url]).await.unwrap().trim().is_empty());
+        assert!(status(&a).await.unwrap().unwrap().changes == 0);
+        sync(&a, true).await.unwrap();
+        assert!(!git(d.path(), &["ls-remote", url]).await.unwrap().trim().is_empty());
 
         pull(&c).await.unwrap(); // unborn branch picks up the remote
         assert_eq!(std::fs::read_to_string(c.join("a.md")).unwrap(), "base\n");
@@ -195,7 +200,7 @@ mod tests {
         git(d.path(), &["clone", "-q", url, b.to_str().unwrap()]).await.unwrap();
         ident(&b).await;
         std::fs::write(b.join("a.md"), "theirs\n").unwrap();
-        sync(&b).await.unwrap();
+        sync(&b, true).await.unwrap();
 
         std::fs::write(a.join("a.md"), "ours\n").unwrap();
         pull(&a).await.unwrap();
@@ -210,7 +215,7 @@ mod tests {
         let s = status(&a).await.unwrap().unwrap();
         assert_eq!((s.changes, s.conflicts.len()), (0, 0));
         assert_eq!(std::fs::read_to_string(a.join("a.md")).unwrap(), "theirs\n");
-        sync(&a).await.unwrap(); // merge commit pushes cleanly
+        sync(&a, true).await.unwrap(); // merge commit pushes cleanly
 
         set_remote(&a, "").await.unwrap();
         assert_eq!(status(&a).await.unwrap().unwrap().remote, None);

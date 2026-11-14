@@ -601,6 +601,9 @@
   .title:focus-visible { outline: none; }
 
   .page { position: relative; max-width: var(--page-w); margin: 0 auto; }
+  /* layout options (Settings) */
+  :global(:root[data-page='left']) .page { margin-left: 24px; }
+  :global(:root[data-toolbar='left']) .toolbar { justify-content: flex-start; padding-left: 12px; }
 
   /* table controls: faint until pointed at */
   .tbl { display: contents; }

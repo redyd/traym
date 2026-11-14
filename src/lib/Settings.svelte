@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core'
   import { toast } from 'svelte-sonner'
   import { X, Plus, Trash2, Copy, Eye, EyeOff, RefreshCw, Check, CircleAlert } from '@lucide/svelte'
-  import { app, persist, backend, loadSettings, saveSettings, type Provider } from './store.svelte'
+  import { app, persist, backend, loadSettings, saveSettings, ACCENTS, type Provider } from './store.svelte'
   import { i18n, t, type Lang } from './i18n.svelte'
 
   let { onclose }: { onclose: () => void } = $props()
@@ -30,10 +30,15 @@
     app.theme = v
     persist()
   }
-  function setDensity(v: typeof app.density) {
-    app.density = v
+  // every General option is one field of `app`, applied live and kept by persist()
+  function set<K extends 'density' | 'accent' | 'toolbarAlign' | 'pageAlign' | 'onClose'>(k: K, v: (typeof app)[K]) {
+    app[k] = v
     persist()
   }
+  const setDensity = (v: typeof app.density) => set('density', v)
+  const accentNames: Record<string, string> = { orange: 'Orange', blue: 'Bleu', green: 'Vert', violet: 'Violet', pink: 'Rose', red: 'Rouge' }
+  const custom = $derived(!(app.accent in ACCENTS))
+  const isDark = $derived(app.theme === 'dark' || (app.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches))
 
   // ---- custom providers: saved on every committed change
   const presets = [
@@ -123,6 +128,29 @@
       <div class="field">
         <span class="label">{t('Densité')}<small>{t("Taille du texte et espacement de l'interface et des notes.")}</small></span>
         {@render choice(t('Densité'), app.density, [['compact', 'Compacte'], ['normal', 'Normale'], ['large', 'Large']], setDensity)}
+      </div>
+      <div class="field">
+        <span class="label">{t("Couleur d'accent")}</span>
+        <div class="swatches" role="radiogroup" aria-label={t("Couleur d'accent")}>
+          {#each Object.entries(ACCENTS) as [k, c]}
+            <button role="radio" aria-checked={app.accent === k} aria-label={t(accentNames[k])} title={t(accentNames[k])} style:--c={isDark ? c.dark : c.light} onclick={() => set('accent', k)}></button>
+          {/each}
+          <label class="custom" class:on={custom} title={t('Couleur personnalisée')} style:--c={custom ? app.accent : undefined}>
+            <input type="color" aria-label={t('Couleur personnalisée')} value={custom ? app.accent : '#888888'} oninput={(e) => set('accent', e.currentTarget.value)} />
+          </label>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">{t("Barre d'outils")}</span>
+        {@render choice(t("Barre d'outils"), app.toolbarAlign, [['center', 'Centrée'], ['left', 'À gauche']], (v) => set('toolbarAlign', v))}
+      </div>
+      <div class="field">
+        <span class="label">{t('Page')}<small>{t('Position du texte des notes dans la fenêtre.')}</small></span>
+        {@render choice(t('Page'), app.pageAlign, [['center', 'Centrée'], ['left', 'À gauche']], (v) => set('pageAlign', v))}
+      </div>
+      <div class="field">
+        <span class="label">{t('À la fermeture')}<small>{t('Avec un dépôt git distant. Sans, traym enregistre simplement dans git.')}</small></span>
+        {@render choice(t('À la fermeture'), app.onClose, [['ask', 'Demander'], ['save', 'Sauvegarder'], ['sync', 'Sauvegarder & synchroniser']], (v) => set('onClose', v))}
       </div>
     {:else if section === 'agents'}
       <h2>{t('Agents IA')}</h2>
@@ -265,6 +293,22 @@
   .seg button:hover { color: var(--fg); }
   .seg button[aria-checked='true'] { background: var(--surface); color: var(--fg); }
 
+  .swatches { display: flex; align-items: center; gap: 8px; }
+  .swatches button, .custom {
+    position: relative;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--c);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent);
+    transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+  .swatches button:hover, .custom:hover { transform: scale(1.1); }
+  .swatches [aria-checked='true'], .custom.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--c); }
+  .custom { cursor: pointer; background: var(--c, conic-gradient(#f87171, #fbbf24, #4cc38a, #5b9dff, #a78bfa, #f472b6, #f87171)); }
+  .custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .custom:focus-within { outline: 1.5px solid var(--orange); outline-offset: 4px; }
+
   .clis { list-style: none; margin: 0; padding: 0; }
   .clis li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
   .clis code, .value code, .head code { font: 12px var(--mono); color: var(--faint); }
@@ -313,7 +357,7 @@
   .track { position: relative; width: 32px; height: 18px; flex: none; border-radius: 9px; background: var(--line); transition: background var(--t-fast) var(--ease); }
   .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--fg); transition: transform var(--t-fast) var(--ease); }
   .switch input:checked + .track { background: var(--orange); }
-  .switch input:checked + .track::after { transform: translateX(14px); background: #fff; }
+  .switch input:checked + .track::after { transform: translateX(14px); background: var(--bg); }
   .switch input:focus-visible + .track { outline: 1.5px solid var(--orange); outline-offset: 2px; }
 
   .value { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 10px; border: 1px solid var(--line-soft); border-radius: var(--r); background: var(--bg-deep); }

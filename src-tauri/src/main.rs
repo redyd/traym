@@ -183,8 +183,8 @@ async fn git_init(core: C<'_>) -> Res<()> {
 }
 
 #[tauri::command]
-async fn git_sync(core: C<'_>) -> Res<()> {
-    git::sync(&core.vault()?).await
+async fn git_sync(core: C<'_>, push: Option<bool>) -> Res<()> {
+    git::sync(&core.vault()?, push.unwrap_or(true)).await
 }
 
 #[tauri::command]

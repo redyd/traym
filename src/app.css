@@ -15,8 +15,8 @@
   --faint: #9c7b60;
   --orange: #ff7a3d;
   --amber: #ffb347;
-  --orange-wash: #ff7a3d1f;
-  --select: #ff7a3d38;
+  --orange-wash: color-mix(in srgb, var(--orange) 12%, transparent);
+  --select: color-mix(in srgb, var(--orange) 22%, transparent);
   --ease: cubic-bezier(.2, .8, .2, 1);
 
   --display: 'Red Hat Display Variable', system-ui, sans-serif;
@@ -48,8 +48,8 @@
   --faint: #a68c78;
   --orange: #e8591a;
   --amber: #c77a12;
-  --orange-wash: #e8591a14;
-  --select: #e8591a2a;
+  --orange-wash: color-mix(in srgb, var(--orange) 8%, transparent);
+  --select: color-mix(in srgb, var(--orange) 16%, transparent);
   color-scheme: light;
 }
 

@@ -591,7 +591,7 @@
     height: 26px;
     border-radius: 50%;
     background: var(--orange);
-    color: #fff;
+    color: var(--bg);
     transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
   }
   .send:disabled { opacity: 0.3; }

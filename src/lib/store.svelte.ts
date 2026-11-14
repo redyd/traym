@@ -12,6 +12,19 @@ const ls = {
   set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch {} },
 }
 
+// what closing the window does: ask, or always do one of the popup's choices
+export type CloseAction = 'ask' | 'save' | 'sync'
+
+// accent presets per theme (the light one is darker, for contrast on a light background)
+export const ACCENTS: Record<string, { dark: string; light: string }> = {
+  orange: { dark: '#ff7a3d', light: '#e8591a' },
+  blue: { dark: '#5b9dff', light: '#2563d6' },
+  green: { dark: '#4cc38a', light: '#1d8f58' },
+  violet: { dark: '#a78bfa', light: '#7346d6' },
+  pink: { dark: '#f472b6', light: '#d1367f' },
+  red: { dark: '#f87171', light: '#d33a3a' },
+}
+
 export const app = $state({
   vault: ls.get('vault') as string | null,
   tree: [] as Node[],
@@ -22,6 +35,10 @@ export const app = $state({
   fresh: null as string | null, // just-created note: editor focuses its title
   theme: (ls.get('theme') ?? 'system') as 'system' | 'light' | 'dark',
   density: (ls.get('density') ?? 'normal') as 'compact' | 'normal' | 'large',
+  accent: ls.get('accent') ?? 'orange', // a preset name (see ACCENTS) or a #rrggbb colour
+  toolbarAlign: (ls.get('toolbarAlign') ?? 'center') as 'center' | 'left',
+  pageAlign: (ls.get('pageAlign') ?? 'center') as 'center' | 'left',
+  onClose: (ls.get('onClose') ?? 'ask') as CloseAction,
   settings: false, // the Settings page replaces the main view while open
   sidebar: ls.get('sidebar') !== '0',
   sidebarW: Number(ls.get('sidebarW') ?? 248),
@@ -29,7 +46,7 @@ export const app = $state({
   palette: null as null | 'files' | 'commands',
   git: null as null | { changes: number; remote: string | null; conflicts: string[] },
   syncing: false,
-  closing: null as null | 'sync' | { error: string }, // sync-on-quit popup
+  closing: null as null | 'ask' | 'busy' | { error: string }, // the popup shown while quitting
 })
 
 // set by the editor so file moves never race a pending autosave
@@ -47,6 +64,10 @@ export function persist() {
   if (app.vault) ls.set('vault', app.vault)
   ls.set('theme', app.theme)
   ls.set('density', app.density)
+  ls.set('accent', app.accent)
+  ls.set('toolbarAlign', app.toolbarAlign)
+  ls.set('pageAlign', app.pageAlign)
+  ls.set('onClose', app.onClose)
   ls.set('lang', i18n.lang)
   ls.set('sidebar', app.sidebar ? '1' : '0')
   ls.set('sidebarW', String(app.sidebarW))
@@ -103,16 +124,30 @@ export const resolve = (path: string, side: 'ours' | 'theirs' | 'manual') => bus
 
 export const abortMerge = () => busy(() => call('git_abort'))
 
-// closing the window: commit (+ push when there is a remote), then really close
+// closing the window: notes are already on disk; with git, "save" commits and "sync" also pushes.
+// The popup asks which (unless a choice was remembered); without a remote both mean the same, so no question.
 export async function quit() {
-  const win = getCurrentWindow()
-  if (app.closing === 'sync') return
-  if (!app.git || app.git.conflicts.length) return win.destroy()
-  app.closing = 'sync'
+  if (app.closing === 'busy' || app.closing === 'ask') return
+  if (!app.git || app.git.conflicts.length) {
+    await hooks.flush()
+    return getCurrentWindow().destroy()
+  }
+  const action = app.git.remote ? app.onClose : 'save'
+  if (action === 'ask') app.closing = 'ask'
+  else await leave(action)
+}
+
+/** The popup's choice (or the remembered one): save / save and sync, then really close. */
+export async function leave(action: 'save' | 'sync', remember = false) {
+  if (remember) {
+    app.onClose = action
+    persist()
+  }
+  app.closing = 'busy'
   try {
     await hooks.flush()
-    await invoke('git_sync')
-    await win.destroy()
+    await invoke('git_sync', { push: action === 'sync' })
+    await getCurrentWindow().destroy()
   } catch (e) {
     app.closing = { error: String(e) }
   }

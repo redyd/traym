@@ -14,7 +14,7 @@
   import Conflicts from './lib/Conflicts.svelte'
   import SettingsPage from './lib/Settings.svelte'
   import { t, lang } from './lib/i18n.svelte'
-  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, loadSettings } from './lib/store.svelte'
+  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, leave, loadSettings, ACCENTS } from './lib/store.svelte'
 
   const win = getCurrentWindow()
   let dark = $state(true)
@@ -62,6 +62,7 @@
   ])
 
   function keys(e: KeyboardEvent) {
+    if (e.key === 'Escape' && app.closing === 'ask') return void (app.closing = null)
     if (e.key === 'Escape' && app.settings && !app.palette) return void (app.settings = false)
     if ((e.ctrlKey || e.metaKey) && e.key === ',') return void (e.preventDefault(), toggleSettings())
     if (!(e.ctrlKey || e.metaKey) || e.altKey || !app.vault || locked) return
@@ -102,7 +103,17 @@
     app.theme // set from Settings too
     applyTheme()
   })
+  // accent: presets have a shade per theme, a custom colour is used as is; the washes derive from it in CSS
   $effect(() => {
+    const p = ACCENTS[app.accent]
+    const c = p ? p[dark ? 'dark' : 'light'] : app.accent
+    if (app.accent === 'orange') document.documentElement.style.removeProperty('--orange')
+    else document.documentElement.style.setProperty('--orange', c)
+  })
+  let remember = $state(false)
+  $effect(() => {
+    document.documentElement.dataset.toolbar = app.toolbarAlign
+    document.documentElement.dataset.page = app.pageAlign
     document.documentElement.dataset.density = app.density
     document.documentElement.lang = lang()
   })
@@ -185,7 +196,17 @@
   {#if app.closing}
     <div class="closing" role="alertdialog" aria-modal="true" aria-labelledby="closing-title">
       <div class="card">
-        {#if app.closing === 'sync'}
+        {#if app.closing === 'ask'}
+          <p id="closing-title">{t('Sauvegarder & synchroniser')}</p>
+          <p class="sub">{t('Enregistrer tes notes dans git avant de quitter, et les envoyer sur le dépôt distant ?')}</p>
+          <label class="remember"><input type="checkbox" bind:checked={remember} />{t('Se souvenir de mon choix')}</label>
+          <div class="actions">
+            <button onclick={() => (app.closing = null)}>{t('Annuler')}</button>
+            <button onclick={() => leave('save', remember)}>{t('Sauvegarder')}</button>
+            <!-- svelte-ignore a11y_autofocus -->
+            <button class="primary" autofocus onclick={() => leave('sync', remember)}>{t('Sauvegarder & synchroniser')}</button>
+          </div>
+        {:else if app.closing === 'busy'}
           <span class="spinner" aria-hidden="true"></span>
           <p id="closing-title">{t('Synchronisation…')}</p>
         {:else}
@@ -251,7 +272,7 @@
   .sep { opacity: 0.6; }
   .divider { width: 1px; height: 16px; background: var(--line-soft); margin: 0 6px; }
   .titlebar :global(.win) { width: 30px; }
-  .titlebar :global(.close:hover) { background: var(--orange); color: #fff; }
+  .titlebar :global(.close:hover) { background: var(--orange); color: var(--bg); }
 
   .body { flex: 1; min-height: 0; }
   .grid { display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
@@ -298,10 +319,13 @@
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .card .sub { max-width: 340px; text-align: center; font: 400 13px/1.5 var(--text); color: var(--muted); }
+  .remember { display: flex; align-items: center; gap: 7px; font: 500 12.5px/1.2 var(--display); color: var(--muted); cursor: pointer; }
+  .remember input { accent-color: var(--orange); margin: 0; }
   .actions { display: flex; gap: 8px; }
-  .actions button { padding: 8px 12px; border-radius: var(--r); font-weight: 600; }
+  .actions button { padding: 8px 12px; border-radius: var(--r); font-weight: 600; white-space: nowrap; }
   .actions button:hover { background: var(--hover); }
-  .actions .primary { background: var(--orange); color: #fff; }
+  .actions .primary { background: var(--orange); color: var(--bg); }
   .actions .primary:hover { background: var(--orange); filter: brightness(1.06); }
 
   .welcome {
@@ -337,7 +361,7 @@
     padding: 10px 16px;
     border-radius: var(--r);
     background: var(--orange);
-    color: #fff;
+    color: var(--bg);
     font-weight: 650;
     font-size: 13.5px;
     transition: transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease);

@@ -192,7 +192,7 @@
   :global(.remote .row) { margin-top: 8px; display: flex; justify-content: flex-end; gap: 6px; }
   :global(.remote button) { padding: 6px 10px; border-radius: var(--r); font: 600 12.5px/1 var(--display); color: var(--muted); }
   :global(.remote button:hover) { background: var(--hover); }
-  :global(.remote .primary) { background: var(--orange); color: #fff; }
+  :global(.remote .primary) { background: var(--orange); color: var(--bg); }
   :global(.remote .primary:disabled) { opacity: 0.5; }
   :global(.spin svg) { animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
