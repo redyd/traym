@@ -582,7 +582,7 @@
   .scroll {
     flex: 1;
     overflow-y: auto;
-    padding: 56px 32px 30vh;
+    padding: 56px clamp(16px, 5%, 32px) 30vh;
   }
   .empty .scroll { display: none; }
 
@@ -603,7 +603,7 @@
   .page { position: relative; max-width: var(--page-w); margin: 0 auto; }
   /* layout options (Settings) */
   :global(:root[data-page='left']) .page { margin-left: 24px; }
-  :global(:root[data-toolbar='left']) .toolbar { justify-content: flex-start; padding-left: 12px; }
+  :global(:root[data-toolbar='left']) .toolbar > :global(:first-child) { margin-left: 4px; }
 
   /* table controls: faint until pointed at */
   .tbl { display: contents; }
@@ -684,11 +684,18 @@
     flex: none;
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 1px;
     height: 40px;
+    padding: 0 8px;
     border-bottom: 1px solid var(--line-soft);
+    /* too narrow: scroll sideways; centred with auto margins so the first buttons stay reachable */
+    overflow-x: auto;
+    scrollbar-width: none;
   }
+  .toolbar > :global(:first-child) { margin-left: auto; }
+  .toolbar > :global(:last-child) { margin-right: auto; }
+  .toolbar :global(.icon-btn) { flex: none; }
+  .toolbar .sep { flex: none; }
   .bar :global(.icon-btn), .toolbar :global(.icon-btn) { width: 28px; height: 28px; color: var(--muted); }
   .bar :global(.icon-btn.on), .toolbar :global(.icon-btn.on) { color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, transparent); }
   .bar .sep, .toolbar .sep { width: 1px; height: 16px; margin: 0 3px; background: var(--line-soft); }
@@ -700,6 +707,7 @@
     display: flex;
     justify-content: flex-end;
     gap: 16px;
+    white-space: nowrap;
     padding: 6px 16px 8px;
     font: 500 11.5px/1 var(--display);
     color: var(--faint);

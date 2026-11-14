@@ -22,6 +22,17 @@
   let ready = $state(false)
 
   const AGENT_W = 368
+  const EDITOR_MIN = 440 // below this the editor is unusable: panels float over it instead
+  let winW = $state(innerWidth)
+  // each panel stays in the layout only if the editor keeps its room (the agent first); otherwise it floats
+  const agentDocked = $derived(app.agent && winW >= AGENT_W + EDITOR_MIN)
+  const sideDocked = $derived(app.sidebar && winW >= app.sidebarW + (agentDocked ? AGENT_W : 0) + EDITOR_MIN)
+  const floating = $derived((app.sidebar && !sideDocked) || (app.agent && !agentDocked))
+  function closeFloating() {
+    if (!sideDocked) app.sidebar = false
+    if (!agentDocked) app.agent = false
+    persist()
+  }
 
   function applyTheme() {
     const sys = matchMedia('(prefers-color-scheme: dark)').matches
@@ -121,7 +132,7 @@
   const crumbs = $derived(app.current ? [...parent(app.current).split('/').filter(Boolean), title(app.current)] : [])
 </script>
 
-<svelte:window onkeydown={keys} />
+<svelte:window onkeydown={keys} bind:innerWidth={winW} />
 
 <Tooltip.Provider delayDuration={350}>
 <div class="shell">
@@ -170,15 +181,18 @@
       class="body grid"
       inert={app.settings}
       class:anim
-      style:grid-template-columns="{app.sidebar ? app.sidebarW : 0}px minmax(0, 1fr) {app.agent ? AGENT_W : 0}px"
+      style:grid-template-columns="{sideDocked ? app.sidebarW : 0}px minmax(0, 1fr) {agentDocked ? AGENT_W : 0}px"
     >
-      <div class="pane" inert={!app.sidebar}>
+      <div class="pane" class:float={app.sidebar && !sideDocked} class:shown={app.sidebar} inert={!app.sidebar}>
         <div style:width="{app.sidebarW}px" style:height="100%"><Sidebar /></div>
       </div>
       <Editor />
-      <div class="pane right" inert={!app.agent}>
+      <div class="pane right" class:float={app.agent && !agentDocked} class:shown={app.agent} inert={!app.agent}>
         <div style:width="{AGENT_W}px" style:height="100%"><AgentPanel /></div>
       </div>
+      {#if floating}
+        <button class="scrim" aria-label={t('Fermer les panneaux')} style:right="{agentDocked ? AGENT_W : 0}px" onclick={closeFloating}></button>
+      {/if}
     </main>
   {:else}
     <main class="body welcome">
@@ -232,7 +246,8 @@
     flex: none;
     height: 40px;
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    /* sides keep their buttons; the breadcrumb shrinks (and stays centred while there is room) */
+    grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr);
     align-items: center;
     padding: 0 6px 0 14px;
     background: var(--bg-deep);
@@ -264,21 +279,55 @@
     display: flex;
     gap: 6px;
     min-width: 0;
+    overflow: hidden;
+    padding: 0 8px;
     color: var(--faint);
     font-weight: 500;
     white-space: nowrap;
   }
-  .crumbs .leaf { color: var(--muted); }
+  .crumbs span:not(.sep) { overflow: hidden; text-overflow: ellipsis; }
+  .crumbs .leaf { color: var(--muted); flex-shrink: 0.2; }
+  @media (max-width: 600px) { .crumbs > :not(.leaf) { display: none; } } /* just the note's name */
   .sep { opacity: 0.6; }
   .divider { width: 1px; height: 16px; background: var(--line-soft); margin: 0 6px; }
   .titlebar :global(.win) { width: 30px; }
   .titlebar :global(.close:hover) { background: var(--orange); color: var(--bg); }
 
   .body { flex: 1; min-height: 0; }
-  .grid { display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+  .grid { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
   .grid.anim { transition: grid-template-columns 240ms var(--ease); }
-  .pane { overflow: hidden; height: 100%; }
+  .pane { overflow: hidden; height: 100%; grid-column: 1; }
+  /* fixed columns: a floating panel leaves the flow, and the editor must not slide into its column */
+  .grid > :global(.editor) { grid-column: 2; }
+  .pane.right { grid-column: 3; }
+  .pane > div { flex: none; } /* keeps its width when the pane floats */
   .pane.right { display: flex; justify-content: flex-end; }
+  /* narrow window: a panel slides over the editor instead of squeezing it */
+  .pane.float {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 15;
+    max-width: calc(100% - 40px);
+    box-shadow: 0 0 40px rgb(0 0 0 / 0.25);
+    animation: slide-l var(--t) var(--ease);
+  }
+  .pane.float.right { left: auto; right: 0; animation-name: slide-r; }
+  /* an absolute grid item with a grid-column is placed inside that (0 px) column: use the whole grid */
+  .pane.float, .pane.float.right { grid-column: auto; }
+  @keyframes slide-l { from { transform: translateX(-100%); } }
+  @keyframes slide-r { from { transform: translateX(100%); } }
+  .scrim {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 14;
+    background: rgb(0 0 0 / 0.3);
+    cursor: default;
+    animation: layer-in var(--t) var(--ease);
+  }
 
   .closing {
     position: fixed;

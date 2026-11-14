@@ -112,8 +112,9 @@
     {/each}
   </nav>
 
+  <button class="icon-btn close" aria-label={t('Fermer')} onclick={onclose}><X size={16} strokeWidth={1.5} /></button>
+
   <div class="content">
-    <button class="icon-btn close" aria-label={t('Fermer')} onclick={onclose}><X size={16} strokeWidth={1.5} /></button>
 
     {#if section === 'general'}
       <h2>{t('Général')}</h2>
@@ -277,18 +278,22 @@
   nav button:hover { background: var(--hover); color: var(--fg); }
   nav button[aria-current='page'] { background: var(--surface); color: var(--fg); }
 
-  .content { position: relative; overflow-y: auto; padding: 28px 40px 48px; max-width: 760px; user-select: text; }
-  .close { position: absolute; top: 16px; right: 16px; }
+  .content { min-width: 0; overflow-y: auto; padding: 28px 40px 48px; user-select: text; }
+  .content > :global(*) { max-width: 680px; }
+  /* top right of the page whatever its width */
+  .close { position: absolute; top: 12px; right: 12px; z-index: 1; }
   h2 { margin: 0 0 22px; font: 650 20px/1.3 var(--display); }
   h3 { margin: 28px 0 8px; font: 600 13px/1.3 var(--display); color: var(--fg); }
   .hint { margin: 0 0 14px; color: var(--muted); line-height: 1.55; }
   small { display: block; margin-top: 3px; color: var(--faint); font-size: 12px; font-weight: 400; line-height: 1.45; }
 
-  .field { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+  /* label and control side by side; the control drops below when there is no room */
+  .field { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 24px; padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+  .field:not(.stack) > .label { flex: 1 1 200px; }
   .field.stack { flex-direction: column; align-items: stretch; gap: 6px; border: 0; padding: 10px 0; }
   .label { font-weight: 600; }
 
-  .seg { display: flex; flex: none; padding: 2px; border: 1px solid var(--line-soft); border-radius: var(--r); }
+  .seg { display: flex; flex-wrap: wrap; max-width: 100%; padding: 2px; border: 1px solid var(--line-soft); border-radius: var(--r); }
   .seg button { padding: 5px 12px; border-radius: 4px; color: var(--faint); font-weight: 500; transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
   .seg button:hover { color: var(--fg); }
   .seg button[aria-checked='true'] { background: var(--surface); color: var(--fg); }
@@ -317,7 +322,7 @@
   .status.ok :global(svg) { color: var(--orange); }
 
   .provider { padding: 14px; margin-bottom: 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--bg-deep); }
-  .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 10px; }
   .grid .wide { grid-column: 1 / -1; }
   .grid label span { display: block; margin-bottom: 4px; font-size: 12px; color: var(--muted); }
   input:not([type='checkbox']) {
@@ -330,8 +335,8 @@
     transition: border-color var(--t-fast) var(--ease);
   }
   input:focus-visible { outline: none; border-color: var(--orange); }
-  .row { display: flex; align-items: center; gap: 10px; margin-top: 12px; min-width: 0; }
-  .result { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; min-width: 0; }
+  .result { display: flex; align-items: center; gap: 5px; flex: 1 1 160px; min-width: 0; font-size: 12px; color: var(--muted); }
   .result :global(svg) { flex: none; }
   .result.ok :global(svg) { color: var(--orange); }
   .result.fail { color: var(--orange); }
@@ -365,5 +370,15 @@
   .snippet { margin-top: 14px; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
   .head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; background: var(--bg-deep); border-bottom: 1px solid var(--line-soft); font-weight: 600; }
   .head button { margin-left: auto; }
+  /* narrow window: the section list becomes a row of tabs above the content */
+  @media (max-width: 720px) {
+    .settings { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    nav { flex-direction: row; align-items: center; gap: 4px; padding: 8px 52px 8px 12px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line-soft); }
+    nav h1 { display: none; }
+    nav button { flex: none; }
+    .close { top: 8px; }
+    .content { padding: 20px 16px 40px; }
+  }
+
   pre { margin: 0; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.55 var(--mono); color: var(--muted); }
 </style>

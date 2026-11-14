@@ -34,6 +34,7 @@ const en: Record<string, string> = {
   'La synchronisation a échoué': 'Sync failed',
   Annuler: 'Cancel',
   'Quitter quand même': 'Quit anyway',
+  'Fermer les panneaux': 'Close panels',
   // commands
   'Nouvelle note': 'New note',
   'Nouveau dossier': 'New folder',
