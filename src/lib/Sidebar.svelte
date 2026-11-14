@@ -109,7 +109,7 @@
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      <Tip class={app.syncing ? 'icon-btn spin' : 'icon-btn'} label={t('Synchroniser (commit + push)')} disabled={app.syncing} onclick={sync}>
+      <Tip class={app.syncing ? 'icon-btn spin' : 'icon-btn'} label={t(app.git.remote ? 'Synchroniser (commit + push)' : 'Commit les notes')} disabled={app.syncing} onclick={sync}>
         <RefreshCw size={14} strokeWidth={1.5} />
       </Tip>
     {:else}

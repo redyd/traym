@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core'
   import { toast } from 'svelte-sonner'
   import { X, Plus, Trash2, Copy, Eye, EyeOff, RefreshCw, Check, CircleAlert } from '@lucide/svelte'
-  import { app, persist, backend, loadSettings, saveSettings, ACCENTS, type Provider } from './store.svelte'
+  import { app, persist, backend, loadSettings, saveSettings, ACCENTS, type Provider, type CloseAction } from './store.svelte'
   import { i18n, t, type Lang } from './i18n.svelte'
 
   let { onclose }: { onclose: () => void } = $props()
@@ -151,7 +151,7 @@
       </div>
       <div class="field">
         <span class="label">{t('À la fermeture')}<small>{t('Avec un dépôt git distant. Sans, traym enregistre simplement dans git.')}</small></span>
-        {@render choice(t('À la fermeture'), app.onClose, [['ask', 'Demander'], ['quit', 'Quitter sans commit'], ['commit', 'Commit'], ['sync', 'Commit & sync']], (v) => set('onClose', v))}
+        {@render choice(t('À la fermeture'), app.onClose, ([['ask', 'Demander'], ['quit', 'Quitter sans commit'], ['commit', 'Commit'], ['sync', 'Commit & sync']] as [CloseAction, string][]).filter(([v]) => v !== 'sync' || app.git?.remote), (v) => set('onClose', v))}
       </div>
     {:else if section === 'agents'}
       <h2>{t('Agents IA')}</h2>

@@ -48,6 +48,7 @@ export const app = $state({
   git: null as null | { changes: number; remote: string | null; conflicts: string[] },
   syncing: false,
   closing: null as null | 'ask' | 'busy' | { error: string }, // the popup shown while quitting
+  pushing: false, // that popup's work includes a push (else only a commit)
 })
 
 // set by the editor so file moves never race a pending autosave
@@ -145,6 +146,7 @@ export async function leave(action: 'quit' | 'commit' | 'sync', remember = false
     app.onClose = action
     persist()
   }
+  app.pushing = action === 'sync' && !!app.git?.remote
   app.closing = 'busy'
   try {
     await hooks.flush()

@@ -225,7 +225,7 @@
       <AlertDialog.Overlay class="dlg-scrim" />
       <AlertDialog.Content class="dlg" interactOutsideBehavior="close">
         {#if app.closing === 'busy'}
-          <div class="dlg-busy"><span class="spinner" aria-hidden="true"></span><AlertDialog.Title class="dlg-title">{t('Synchronisation…')}</AlertDialog.Title></div>
+          <div class="dlg-busy"><span class="spinner" aria-hidden="true"></span><AlertDialog.Title class="dlg-title">{t(app.pushing ? 'Synchronisation…' : 'Commit…')}</AlertDialog.Title></div>
         {:else}
           {@const failed = typeof app.closing === 'object' && app.closing}
           <div class="dlg-head">
@@ -233,7 +233,7 @@
               {#if failed}<TriangleAlert size={18} strokeWidth={1.75} />{:else}<GitCommitHorizontal size={18} strokeWidth={1.75} />{/if}
             </span>
             <div>
-              <AlertDialog.Title class="dlg-title">{failed ? t('La synchronisation a échoué') : t('Avant de quitter')}</AlertDialog.Title>
+              <AlertDialog.Title class="dlg-title">{failed ? t(app.pushing ? 'La synchronisation a échoué' : 'Le commit a échoué') : t('Avant de quitter')}</AlertDialog.Title>
               <AlertDialog.Description class="dlg-desc">
                 {#if failed}{t('Tes notes sont enregistrées sur le disque, mais pas dans git.')}
                 {:else}{t(app.git?.changes === 1 ? '1 fichier modifié depuis le dernier commit.' : '{n} fichiers modifiés depuis le dernier commit.', { n: app.git?.changes ?? 0 })}{/if}
