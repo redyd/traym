@@ -9,8 +9,9 @@
   import { open } from '@tauri-apps/plugin-dialog'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
-    Table, Image, BetweenHorizontalStart, BetweenHorizontalEnd, BetweenVerticalStart, BetweenVerticalEnd, Trash2, Grid2x2X, GripVertical, GripHorizontal, Plus,
+    Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus,
   } from '@lucide/svelte'
+  import TableIcon, { type TableOp } from './TableIcon.svelte'
   import { extensions, split, media } from './schema'
   import Tip from './Tip.svelte'
   import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists } from './store.svelte'
@@ -141,16 +142,16 @@
   const lastRow = (t: HTMLTableElement) => t.rows[t.rows.length - 1].cells[0] as HTMLElement
   const lastCol = (t: HTMLTableElement) => t.rows[0].cells[t.rows[0].cells.length - 1] as HTMLElement
 
-  type Item = { label: string; icon: typeof Bold; run: (c: ChainedCommands) => ChainedCommands; danger?: boolean }
+  type Item = { label: string; icon: TableOp | typeof Bold; run: (c: ChainedCommands) => ChainedCommands; danger?: boolean }
   const rowMenu: Item[] = [
-    { label: 'Insérer au-dessus', icon: BetweenHorizontalStart, run: (c) => c.addRowBefore() },
-    { label: 'Insérer en dessous', icon: BetweenHorizontalEnd, run: (c) => c.addRowAfter() },
-    { label: 'Supprimer la ligne', icon: Trash2, run: (c) => c.deleteRow(), danger: true },
+    { label: 'Insérer une ligne au-dessus', icon: 'row-above', run: (c) => c.addRowBefore() },
+    { label: 'Insérer une ligne en dessous', icon: 'row-below', run: (c) => c.addRowAfter() },
+    { label: 'Supprimer la ligne', icon: 'row-del', run: (c) => c.deleteRow(), danger: true },
   ]
   const colMenu: Item[] = [
-    { label: 'Insérer à gauche', icon: BetweenVerticalStart, run: (c) => c.addColumnBefore() },
-    { label: 'Insérer à droite', icon: BetweenVerticalEnd, run: (c) => c.addColumnAfter() },
-    { label: 'Supprimer la colonne', icon: Trash2, run: (c) => c.deleteColumn(), danger: true },
+    { label: 'Insérer une colonne à gauche', icon: 'col-left', run: (c) => c.addColumnBefore() },
+    { label: 'Insérer une colonne à droite', icon: 'col-right', run: (c) => c.addColumnAfter() },
+    { label: 'Supprimer la colonne', icon: 'col-del', run: (c) => c.deleteColumn(), danger: true },
   ]
   // only while the caret is in a table: the same actions, reachable from the keyboard (the grips are mouse-only)
   const tableTools: Item[] = [...rowMenu, ...colMenu, { label: 'Supprimer le tableau', icon: Grid2x2X, run: (c) => c.deleteTable(), danger: true }]
@@ -399,10 +400,15 @@
   {/each}
   {#if table && on.includes('table')}
     <span class="sep"></span>
-    {#each tableTools as t}
-      <Tip class="icon-btn" label={t.label} onclick={() => t.run(cmd()).run()}><t.icon size={15} strokeWidth={1.6} /></Tip>
+    {#each tableTools as t, i}
+      {#if i === 3 || i === 6}<span class="sep thin"></span>{/if}
+      <Tip class={t.danger ? 'icon-btn danger' : 'icon-btn'} label={t.label} onclick={() => t.run(cmd()).run()}>{@render icon(t, 15)}</Tip>
     {/each}
   {/if}
+{/snippet}
+
+{#snippet icon(t: Item, size: number)}
+  {#if typeof t.icon === 'string'}<TableIcon kind={t.icon} {size} />{:else}<t.icon {size} strokeWidth={1.6} />{/if}
 {/snippet}
 
 {#snippet tableMenu(k: 'row' | 'col', h: Hover, style: string)}
@@ -413,7 +419,7 @@
     <DropdownMenu.Portal>
       <DropdownMenu.Content class="menu" side={k === 'row' ? 'left' : 'bottom'} align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={(e) => e.preventDefault()}>
         {#each k === 'row' ? rowMenu : colMenu as it}
-          <DropdownMenu.Item class={it.danger ? 'danger' : ''} onSelect={() => at(h.cell, it.run)}><it.icon size={14} strokeWidth={1.6} />{it.label}</DropdownMenu.Item>
+          <DropdownMenu.Item class={it.danger ? 'danger' : ''} onSelect={() => at(h.cell, it.run)}>{@render icon(it, 14)}{it.label}</DropdownMenu.Item>
         {/each}
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
@@ -609,6 +615,8 @@
   .bar :global(.icon-btn), .toolbar :global(.icon-btn) { width: 28px; height: 28px; color: var(--muted); }
   .bar :global(.icon-btn.on), .toolbar :global(.icon-btn.on) { color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, transparent); }
   .bar .sep, .toolbar .sep { width: 1px; height: 16px; margin: 0 3px; background: var(--line-soft); }
+  .toolbar .sep.thin { height: 8px; margin: 0 1px; }
+  .toolbar :global(.icon-btn.danger:hover) { color: var(--orange); }
   @keyframes bar { from { opacity: 0; } }
 
   footer {
