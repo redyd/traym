@@ -62,10 +62,12 @@ fn open_vault(core: C, path: String) -> Res<Vec<Node>> {
             if e.kind.is_access() {
                 return;
             }
-            let paths: Vec<String> = e.paths.iter()
-                .filter_map(|p| p.strip_prefix(&base).ok())
-                .map(|p| p.to_string_lossy().to_string())
-                .filter(|p| !p.ends_with(".traym-tmp") && !p.split('/').any(|c| c.starts_with('.')))
+            // with whether each still exists, so the UI can tell an edit (no tree refresh) from a
+            // create / delete / rename. Other files (images, downloads…) are none of the tree's business.
+            let paths: Vec<Value> = e.paths.iter()
+                .filter_map(|p| Some((p.strip_prefix(&base).ok()?.to_string_lossy().to_string(), p.exists(), p.is_dir())))
+                .filter(|(p, exists, dir)| !p.split('/').any(|c| c.starts_with('.')) && (p.ends_with(".md") || *dir || !exists))
+                .map(|(path, exists, _)| json!({ "path": path, "exists": exists }))
                 .collect();
             if !paths.is_empty() {
                 let _ = app.emit("vault://changed", paths);
@@ -98,11 +100,21 @@ fn free_path(root: &std::path::Path, dir: &str, file: &str) -> Res<(String, Path
     unreachable!()
 }
 
-/// Copy a file picked outside the vault into `dir`. Returns its vault-relative path.
+/// What notes may embed. Nothing else is ever copied into the vault: a page that went rogue could
+/// otherwise pull any file of the disk (an SSH key…) in, and read it back through the asset protocol.
+const IMAGES: [&str; 7] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"];
+
+fn image_name(name: &str) -> Res<String> {
+    let file = std::path::Path::new(name).file_name().ok_or("invalid name")?.to_string_lossy().to_string();
+    let ext = std::path::Path::new(&file).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if IMAGES.contains(&ext.as_str()) { Ok(file) } else { Err(format!("not an image: {file}")) }
+}
+
+/// Copy an image picked outside the vault into `dir`. Returns its vault-relative path.
 #[tauri::command]
 fn import_file(core: C, src: String, dir: String) -> Res<String> {
     let from = PathBuf::from(&src);
-    let name = from.file_name().ok_or("invalid file")?.to_string_lossy().to_string();
+    let name = image_name(&from.to_string_lossy())?;
     let (rel, to) = free_path(&core.vault()?, &dir, &name)?;
     std::fs::copy(&from, &to).map_err(|e| e.to_string())?;
     Ok(rel)
@@ -114,9 +126,8 @@ fn import_file(core: C, src: String, dir: String) -> Res<String> {
 fn save_file(core: C, request: tauri::ipc::Request) -> Res<String> {
     let tauri::ipc::InvokeBody::Raw(data) = request.body() else { return Err("invalid content".into()) };
     let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(uri_decode).ok_or(format!("missing header {k}"));
-    let name = header("x-name")?;
-    // a bare file name: never a path that could climb out of `dir`
-    let name = std::path::Path::new(&name).file_name().ok_or("invalid name")?.to_string_lossy().to_string();
+    // a bare image name: never a path that could climb out of `dir`
+    let name = image_name(&header("x-name")?)?;
     let (rel, to) = free_path(&core.vault()?, &header("x-dir")?, &name)?;
     std::fs::write(&to, data).map_err(|e| e.to_string())?;
     Ok(rel)
@@ -283,5 +294,13 @@ mod tests {
         assert_eq!(super::uri_decode("capture%20d%E2%80%99%C3%A9cran.png"), "capture d’écran.png");
         assert_eq!(super::uri_decode("plain.png"), "plain.png");
         assert_eq!(super::uri_decode("bad%zz%4"), "bad%zz%4");
+    }
+
+    #[test]
+    fn only_images_come_in() {
+        assert_eq!(super::image_name("/home/u/Shot.PNG").unwrap(), "Shot.PNG");
+        assert_eq!(super::image_name("../../x.png").unwrap(), "x.png");
+        assert!(super::image_name("/home/u/.ssh/id_ed25519").is_err());
+        assert!(super::image_name("notes.md").is_err());
     }
 }

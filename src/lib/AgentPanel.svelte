@@ -14,7 +14,7 @@
   type Model = { id: string; name: string; default: boolean; light: boolean }
   // attached to the next message: a mentioned file/folder, or a long paste kept out of the textarea
   type Att = { kind: 'file' | 'dir'; path: string } | { kind: 'text'; text: string }
-  type Line = { role: 'user' | 'ai' | 'action' | 'error'; text: string; open?: boolean; path?: string | null; tool?: string; atts?: Att[] }
+  type Line = { role: 'user' | 'ai' | 'action' | 'error'; text: string; open?: boolean; shown?: number; path?: string | null; tool?: string; atts?: Att[] }
 
   const ls = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
   let agent = $state<Agent>(ls('agent') ?? 'claude')
@@ -34,6 +34,7 @@
   let running = $state(false)
   let input = $state('')
   let list: HTMLDivElement
+  let stick = true // follow the bottom unless the user scrolled up to read
   let box: HTMLTextAreaElement
 
   const nameOf = (a: Agent) =>
@@ -136,8 +137,43 @@
   const render = (md: string) => DOMPurify.sanitize(marked.parse(md, { async: false }) as string)
 
   async function scroll() {
+    stick = true
     await tick()
-    list?.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
+    if (list) list.scrollTop = list.scrollHeight
+  }
+
+  // still writing out: the model is streaming, or its text is revealed letter by letter behind it
+  const typing = (l: Line) => l.open || (l.shown ?? l.text.length) < l.text.length
+
+  // Typewriter: deltas arrive in bursts (Claude: ~20 chunks in 200 ms, then a pause), so the visible text
+  // trails them at ~60 chars/s, faster as the backlog grows, never more than ~0.2 s behind.
+  function typeOut(dt: number) {
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+    let moved = false
+    for (const l of lines) {
+      if (l.role !== 'ai' || l.shown == null || l.shown >= l.text.length) continue
+      const left = l.text.length - l.shown
+      let n = still ? l.text.length : l.shown + Math.max(1, Math.ceil((left * dt) / 180))
+      const c = l.text.charCodeAt(n - 1)
+      if (c >= 0xd800 && c <= 0xdbff) n++ // don't split an emoji's surrogate pair
+      l.shown = Math.min(n, l.text.length)
+      moved = true
+    }
+    if (moved && stick) tick().then(() => list && (list.scrollTop = list.scrollHeight))
+    return moved
+  }
+
+  // the frame loop runs only while some text is left to reveal, then stops until the next delta
+  let frame = 0, prev = 0
+  function kick() {
+    if (frame) return
+    prev = performance.now()
+    const loop = (now: number) => {
+      const moved = typeOut(Math.min(now - prev, 100))
+      prev = now
+      frame = moved ? requestAnimationFrame(loop) : 0
+    }
+    frame = requestAnimationFrame(loop)
   }
 
   async function send(text = input.trim()) {
@@ -189,16 +225,17 @@
         case 'session': session = e.id; break
         case 'delta':
           if (l?.role === 'ai' && l.open) l.text += e.text
-          else lines.push({ role: 'ai', text: e.text, open: true })
+          else lines.push({ role: 'ai', text: e.text, open: true, shown: 0 })
+          kick()
           break
         case 'message':
           if (l?.role === 'ai' && l.open) { l.text = e.text; l.open = false }
-          else lines.push({ role: 'ai', text: e.text })
+          else lines.push({ role: 'ai', text: e.text, shown: 0 })
+          kick()
           break
         case 'tool': close(); break
-        case 'error': close(); lines.push({ role: 'error', text: e.text }); break
+        case 'error': close(); lines.push({ role: 'error', text: e.text }); scroll(); break
       }
-      scroll()
     })
     const m = listen<{ tool: string; path: string | null }>('mcp://call', ({ payload }) => {
       close()
@@ -208,7 +245,7 @@
       }
       scroll()
     })
-    return () => { a.then((f) => f()); m.then((f) => f()) }
+    return () => { a.then((f) => f()); m.then((f) => f()); cancelAnimationFrame(frame) }
   })
 
   $effect(() => {
@@ -242,7 +279,7 @@
     <Tip class="icon-btn" label={tr('Nouvelle conversation')} disabled={running} onclick={reset}><SquarePen size={15} strokeWidth={1.5} /></Tip>
   </header>
 
-  <div class="lines" bind:this={list}>
+  <div class="lines" bind:this={list} onscroll={() => (stick = list.scrollHeight - list.scrollTop - list.clientHeight <= 40)}>
     {#if !lines.length}
       <div class="intro">
         {#if none}
@@ -269,8 +306,8 @@
         </div>
       {:else if l.role === 'ai'}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-        <div class="ai" class:open={l.open} onclick={(e) => (e.target as HTMLElement).closest('a') && e.preventDefault()}>
-          {@html render(l.text)}
+        <div class="ai" class:open={typing(l)} onclick={(e) => (e.target as HTMLElement).closest('a') && e.preventDefault()}>
+          {@html render(l.shown == null ? l.text : l.text.slice(0, l.shown))}
         </div>
       {:else if l.role === 'action'}
         {@const Icon = icons[l.tool ?? ''] ?? FileText}
@@ -285,7 +322,7 @@
       {/if}
     {/each}
 
-    {#if running && !(last()?.role === 'ai' && last()?.open)}
+    {#if running && !(last()?.role === 'ai' && typing(last()))}
       <div class="dots" aria-label={tr('{agent} réfléchit', { agent: label })}><i></i><i></i><i></i></div>
     {/if}
   </div>

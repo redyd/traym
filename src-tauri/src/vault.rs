@@ -20,10 +20,11 @@ pub struct Node {
 }
 
 /// Map a vault-relative path to an absolute one, refusing anything that could
-/// land outside the vault (`..`, absolute paths, symlinks pointing out).
+/// land outside the vault (`..`, absolute paths, symlinks pointing out) or in a hidden
+/// file or folder: `.git/config` rewritten by an agent would run commands on the next `git status`.
 pub fn resolve(root: &Path, rel: &str) -> Res<PathBuf> {
     let p = Path::new(rel);
-    if p.components().any(|c| !matches!(c, Component::Normal(_))) {
+    if p.components().any(|c| !matches!(c, Component::Normal(n) if !hidden(&n.to_string_lossy()))) {
         return Err(format!("invalid path: {rel}"));
     }
     let full = root.join(p);
@@ -71,12 +72,20 @@ fn walk(dir: &Path, prefix: &str) -> Res<Vec<Node>> {
     Ok(out)
 }
 
+/// Only notes are read and written as text: never another file the vault happens to hold.
+fn note(root: &Path, rel: &str) -> Res<PathBuf> {
+    if !rel.ends_with(".md") {
+        return Err(format!("not a note: {rel}"));
+    }
+    resolve(root, rel)
+}
+
 pub fn read(root: &Path, rel: &str) -> Res<String> {
-    fs::read_to_string(resolve(root, rel)?).map_err(err)
+    fs::read_to_string(note(root, rel)?).map_err(err)
 }
 
 pub fn write(root: &Path, rel: &str, content: &str) -> Res<()> {
-    let p = resolve(root, rel)?;
+    let p = note(root, rel)?;
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent).map_err(err)?;
     }
@@ -101,6 +110,10 @@ pub fn rename(root: &Path, from: &str, to: &str) -> Res<()> {
     let (a, b) = (resolve(root, from)?, resolve(root, to)?);
     if b.exists() {
         return Err(format!("already exists: {to}"));
+    }
+    // a note stays a note: no turning it into a script or a config file
+    if a.is_file() && !(from.ends_with(".md") && to.ends_with(".md")) {
+        return Err("only notes (.md) can be moved".into());
     }
     if b.starts_with(&a) {
         return Err("cannot move a folder into itself".into());
@@ -171,6 +184,13 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(out.path(), root.join("link")).unwrap();
         assert!(resolve(root, "link/x.md").is_err());
+        assert!(resolve(root, ".git/config").is_err());
+        assert!(resolve(root, "a/.hidden/x.md").is_err());
+        assert!(read(root, "a/x.txt").is_err());
+        assert!(write(root, "x.sh", "").is_err());
+        write(root, "evil.md", "").unwrap();
+        assert!(rename(root, "evil.md", "evil.sh").is_err());
+        assert!(trash(root, ".git").is_err());
     }
 
     #[test]

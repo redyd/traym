@@ -232,12 +232,17 @@ export function reveal(path: string) {
   for (let i = 1; i < parts.length; i++) app.open.add(parts.slice(0, i).join('/'))
 }
 
-let refreshTimer = 0
+// A note's content changing (every autosave) leaves the tree as it is: only the git count is redone,
+// lazily. Something appearing or vanishing (create, delete, rename) redoes the tree too.
+let refreshTimer = 0, statusTimer = 0
 export const onDiskChange = (cb: (paths: string[]) => void) =>
-  listen<string[]>('vault://changed', (e) => {
-    clearTimeout(refreshTimer)
-    refreshTimer = window.setTimeout(refresh, 120)
-    cb(e.payload)
+  listen<{ path: string; exists: boolean }[]>('vault://changed', (e) => {
+    clearTimeout(statusTimer)
+    if (e.payload.some((c) => c.exists !== exists(c.path))) {
+      clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(refresh, 120)
+    } else statusTimer = window.setTimeout(gitStatus, 1500)
+    cb(e.payload.map((c) => c.path))
   })
 
 export const isMac = navigator.platform.toLowerCase().includes('mac')
