@@ -43,6 +43,7 @@ export const app = $state({
   sidebar: ls.get('sidebar') !== '0',
   sidebarW: Number(ls.get('sidebarW') ?? 248),
   agent: ls.get('agentOpen') === '1',
+  agentW: Number(ls.get('agentW') ?? 368),
   palette: null as null | 'files' | 'commands',
   git: null as null | { changes: number; remote: string | null; conflicts: string[] },
   syncing: false,
@@ -72,6 +73,7 @@ export function persist() {
   ls.set('sidebar', app.sidebar ? '1' : '0')
   ls.set('sidebarW', String(app.sidebarW))
   ls.set('agentOpen', app.agent ? '1' : '0')
+  ls.set('agentW', String(app.agentW))
   ls.set('open', JSON.stringify([...app.open]))
   if (app.current) ls.set('current', app.current)
 }

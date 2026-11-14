@@ -21,17 +21,28 @@
   let anim = $state(false)
   let ready = $state(false)
 
-  const AGENT_W = 368
   const EDITOR_MIN = 440 // below this the editor is unusable: panels float over it instead
   let winW = $state(innerWidth)
   // each panel stays in the layout only if the editor keeps its room (the agent first); otherwise it floats
-  const agentDocked = $derived(app.agent && winW >= AGENT_W + EDITOR_MIN)
-  const sideDocked = $derived(app.sidebar && winW >= app.sidebarW + (agentDocked ? AGENT_W : 0) + EDITOR_MIN)
+  const agentDocked = $derived(app.agent && winW >= app.agentW + EDITOR_MIN)
+  const sideDocked = $derived(app.sidebar && winW >= app.sidebarW + (agentDocked ? app.agentW : 0) + EDITOR_MIN)
   const floating = $derived((app.sidebar && !sideDocked) || (app.agent && !agentDocked))
   function closeFloating() {
     if (!sideDocked) app.sidebar = false
     if (!agentDocked) app.agent = false
     persist()
+  }
+
+  // drag a panel's inner edge; the width is kept between sessions
+  function resize(e: PointerEvent, side: 'left' | 'right') {
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
+    const move = (ev: PointerEvent) => {
+      if (side === 'left') app.sidebarW = Math.max(180, Math.min(420, ev.clientX))
+      else app.agentW = Math.max(300, Math.min(640, innerWidth - ev.clientX))
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', () => { el.removeEventListener('pointermove', move); persist() }, { once: true })
   }
 
   function applyTheme() {
@@ -181,17 +192,19 @@
       class="body grid"
       inert={app.settings}
       class:anim
-      style:grid-template-columns="{sideDocked ? app.sidebarW : 0}px minmax(0, 1fr) {agentDocked ? AGENT_W : 0}px"
+      style:grid-template-columns="{sideDocked ? app.sidebarW : 0}px minmax(0, 1fr) {agentDocked ? app.agentW : 0}px"
     >
       <div class="pane" class:float={app.sidebar && !sideDocked} class:shown={app.sidebar} inert={!app.sidebar}>
         <div style:width="{app.sidebarW}px" style:height="100%"><Sidebar /></div>
+        <div class="handle" role="separator" aria-orientation="vertical" onpointerdown={(e) => resize(e, 'left')}></div>
       </div>
       <Editor />
       <div class="pane right" class:float={app.agent && !agentDocked} class:shown={app.agent} inert={!app.agent}>
-        <div style:width="{AGENT_W}px" style:height="100%"><AgentPanel /></div>
+        <div style:width="{app.agentW}px" style:height="100%"><AgentPanel /></div>
+        <div class="handle" role="separator" aria-orientation="vertical" onpointerdown={(e) => resize(e, 'right')}></div>
       </div>
       {#if floating}
-        <button class="scrim" aria-label={t('Fermer les panneaux')} style:right="{agentDocked ? AGENT_W : 0}px" onclick={closeFloating}></button>
+        <button class="scrim" aria-label={t('Fermer les panneaux')} style:right="{agentDocked ? app.agentW : 0}px" onclick={closeFloating}></button>
       {/if}
     </main>
   {:else}
@@ -314,7 +327,10 @@
   .body { flex: 1; min-height: 0; }
   .grid { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; }
   .grid.anim { transition: grid-template-columns 240ms var(--ease); }
-  .pane { overflow: hidden; height: 100%; grid-column: 1; }
+  .pane { position: relative; overflow: hidden; height: 100%; grid-column: 1; }
+  .handle { position: absolute; top: 0; right: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 3; }
+  .pane.right .handle { right: auto; left: 0; }
+  .handle:hover, .handle:active { background: var(--line); }
   /* fixed columns: a floating panel leaves the flow, and the editor must not slide into its column */
   .grid > :global(.editor) { grid-column: 2; }
   .pane.right { grid-column: 3; }

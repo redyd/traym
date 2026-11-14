@@ -35,13 +35,6 @@
     move(from, to)
   }
 
-  function resize(e: PointerEvent) {
-    const el = e.currentTarget as HTMLElement
-    el.setPointerCapture(e.pointerId)
-    const move = (ev: PointerEvent) => (app.sidebarW = Math.max(180, Math.min(420, ev.clientX)))
-    el.addEventListener('pointermove', move)
-    el.addEventListener('pointerup', () => { el.removeEventListener('pointermove', move); persist() }, { once: true })
-  }
 </script>
 
 <aside class="sidebar">
@@ -124,7 +117,6 @@
     {/if}
   </footer>
 
-  <div class="handle" role="separator" aria-orientation="vertical" onpointerdown={resize}></div>
 </aside>
 
 
@@ -197,15 +189,5 @@
   :global(.spin svg) { animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .handle {
-    position: absolute;
-    top: 0;
-    right: -3px;
-    width: 6px;
-    height: 100%;
-    cursor: col-resize;
-    z-index: 3;
-  }
-  .handle:hover, .handle:active { background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat; }
 
 </style>
