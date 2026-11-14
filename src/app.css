@@ -3,18 +3,20 @@
 @import '@fontsource-variable/red-hat-mono';
 
 :root {
-  --bg: #2b1a0e;
-  --bg-deep: #24150b;
-  --surface: #3a2414cc;
-  --surface-solid: #36210f;
-  --hover: #ffffff0a;
-  --line: #5a3a22;
-  --line-soft: #4a2f1b;
-  --fg: #fbeee0;
-  --muted: #d6b89c;
-  --faint: #9c7b60;
+  /* the whole palette follows the accent: same lightness, a share of its chroma, its hue (shifted a
+     little towards yellow, as the original orange theme was). A grey accent gives a neutral theme. */
   --orange: #ff7a3d;
-  --amber: #ffb347;
+  --bg: oklch(from var(--orange) 0.237 calc(c * 0.193) calc(h + 12.3));
+  --bg-deep: oklch(from var(--orange) 0.213 calc(c * 0.172) calc(h + 10.8));
+  --surface: oklch(from var(--orange) 0.284 calc(c * 0.24) calc(h + 12.9) / 0.8);
+  --surface-solid: oklch(from var(--orange) 0.27 calc(c * 0.245) calc(h + 16.8));
+  --hover: #ffffff0a;
+  --line: oklch(from var(--orange) 0.38 calc(c * 0.328) calc(h + 13.6));
+  --line-soft: oklch(from var(--orange) 0.333 calc(c * 0.285) calc(h + 13.3));
+  --fg: oklch(from var(--orange) 0.956 calc(c * 0.131) calc(h + 26.4));
+  --muted: oklch(from var(--orange) 0.801 calc(c * 0.289) calc(h + 21.8));
+  --faint: oklch(from var(--orange) 0.608 calc(c * 0.317) calc(h + 17.5));
+  --amber: oklch(from var(--orange) 0.821 calc(c * 0.834) calc(h + 28.9));
   --orange-wash: color-mix(in srgb, var(--orange) 12%, transparent);
   --select: color-mix(in srgb, var(--orange) 22%, transparent);
   --ease: cubic-bezier(.2, .8, .2, 1);
@@ -36,18 +38,18 @@
 }
 
 :root[data-theme='light'] {
-  --bg: #fcf9f6;
-  --bg-deep: #f6f0ea;
-  --surface: #f3ebe3cc;
-  --surface-solid: #f1e8df;
-  --hover: #2b1a0e0a;
-  --line: #e4d6c8;
-  --line-soft: #ede3d8;
-  --fg: #2b1a0e;
-  --muted: #6e5240;
-  --faint: #a68c78;
   --orange: #e8591a;
-  --amber: #c77a12;
+  --bg: oklch(from var(--orange) 0.984 calc(c * 0.027) calc(h + 27.5));
+  --bg-deep: oklch(from var(--orange) 0.958 calc(c * 0.054) calc(h + 27.4));
+  --surface: oklch(from var(--orange) 0.944 calc(c * 0.073) calc(h + 27.4) / 0.8);
+  --surface-solid: oklch(from var(--orange) 0.936 calc(c * 0.082) calc(h + 27.3));
+  --hover: color-mix(in srgb, var(--fg) 4%, transparent);
+  --line: oklch(from var(--orange) 0.884 calc(c * 0.129) calc(h + 27.2));
+  --line-soft: oklch(from var(--orange) 0.921 calc(c * 0.097) calc(h + 29.9));
+  --fg: oklch(from var(--orange) 0.237 calc(c * 0.181) calc(h + 15.2));
+  --muted: oklch(from var(--orange) 0.463 calc(c * 0.247) calc(h + 13.7));
+  --faint: oklch(from var(--orange) 0.658 calc(c * 0.225) calc(h + 19.2));
+  --amber: oklch(from var(--orange) 0.648 calc(c * 0.737) calc(h + 25.4));
   --orange-wash: color-mix(in srgb, var(--orange) 8%, transparent);
   --select: color-mix(in srgb, var(--orange) 16%, transparent);
   color-scheme: light;
