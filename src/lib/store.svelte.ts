@@ -102,7 +102,8 @@ export async function gitInit() {
   await gitStatus()
 }
 
-export const sync = () => busy(() => call('git_sync'))
+// an empty message means git.rs's default ("traym: sync")
+export const sync = (message = '', push = true) => busy(() => call('git_sync', { message, push }))
 
 async function busy(fn: () => Promise<unknown>) {
   if (app.syncing) return
@@ -141,7 +142,7 @@ export async function quit() {
 }
 
 /** The popup's choice (or the remembered one): commit, push too for sync, then really close. */
-export async function leave(action: 'quit' | 'commit' | 'sync', remember = false) {
+export async function leave(action: 'quit' | 'commit' | 'sync', remember = false, message = '') {
   if (remember) {
     app.onClose = action
     persist()
@@ -150,7 +151,7 @@ export async function leave(action: 'quit' | 'commit' | 'sync', remember = false
   app.closing = 'busy'
   try {
     await hooks.flush()
-    if (action !== 'quit') await invoke('git_sync', { push: action === 'sync' })
+    if (action !== 'quit') await invoke('git_sync', { push: action === 'sync', message })
     await getCurrentWindow().destroy()
   } catch (e) {
     app.closing = { error: String(e) }

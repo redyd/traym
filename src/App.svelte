@@ -137,6 +137,8 @@
     else document.documentElement.style.setProperty('--orange', c)
   })
   let remember = $state(false)
+  let message = $state('') // the close popup's commit message (empty: git.rs's default)
+  let msgEl = $state<HTMLInputElement>()
   $effect(() => {
     document.documentElement.dataset.toolbar = app.toolbarAlign
     document.documentElement.dataset.page = app.pageAlign
@@ -227,7 +229,7 @@
   <AlertDialog.Root open={!!app.closing} onOpenChange={(o) => !o && app.closing !== 'busy' && (app.closing = null)}>
     <AlertDialog.Portal>
       <AlertDialog.Overlay class="dlg-scrim" />
-      <AlertDialog.Content class="dlg" interactOutsideBehavior="close">
+      <AlertDialog.Content class="dlg" interactOutsideBehavior="close" onOpenAutoFocus={(e) => { if (msgEl) { e.preventDefault(); msgEl.focus() } }}>
         {#if app.closing === 'busy'}
           <div class="dlg-busy"><span class="spinner" aria-hidden="true"></span><AlertDialog.Title class="dlg-title">{t(app.pushing ? 'Synchronisation…' : 'Commit…')}</AlertDialog.Title></div>
         {:else}
@@ -236,13 +238,15 @@
             <span class="dlg-icon">
               {#if failed}<TriangleAlert size={18} strokeWidth={1.75} />{:else}<GitCommitHorizontal size={18} strokeWidth={1.75} />{/if}
             </span>
-            <div>
+            <div class="dlg-body">
               <AlertDialog.Title class="dlg-title">{failed ? t(app.pushing ? 'La synchronisation a échoué' : 'Le commit a échoué') : t('Avant de quitter')}</AlertDialog.Title>
               <AlertDialog.Description class="dlg-desc">
                 {#if failed}{t('Tes notes sont enregistrées sur le disque, mais pas dans git.')}
                 {:else}{t(app.git?.changes === 1 ? '1 fichier modifié depuis le dernier commit.' : '{n} fichiers modifiés depuis le dernier commit.', { n: app.git?.changes ?? 0 })}{/if}
               </AlertDialog.Description>
               {#if !failed}
+                <input class="dlg-msg" bind:this={msgEl} bind:value={message} placeholder="traym: sync" aria-label={t('Message de commit')} spellcheck="false" autocomplete="off"
+                  onkeydown={(e) => e.key === 'Enter' && leave(app.git?.remote ? 'sync' : 'commit', remember, message)} />
                 <Checkbox.Root class="remember" bind:checked={remember}>
                   <span class="box"><Check size={11} strokeWidth={3} /></span>{t('Se souvenir de mon choix')}
                 </Checkbox.Root>
@@ -258,10 +262,10 @@
               <AlertDialog.Action class="btn ghost" onclick={() => leave('quit', remember)}>{t('Quitter sans commit')}</AlertDialog.Action>
               <AlertDialog.Cancel class="btn">{t('Annuler')}</AlertDialog.Cancel>
               {#if app.git?.remote}
-                <AlertDialog.Action class="btn" onclick={() => leave('commit', remember)}>{t('Commit')}</AlertDialog.Action>
-                <AlertDialog.Action class="btn primary" onclick={() => leave('sync', remember)}><CloudUpload size={14} strokeWidth={2} />{t('Commit & sync')}</AlertDialog.Action>
+                <AlertDialog.Action class="btn" onclick={() => leave('commit', remember, message)}>{t('Commit')}</AlertDialog.Action>
+                <AlertDialog.Action class="btn primary" onclick={() => leave('sync', remember, message)}><CloudUpload size={14} strokeWidth={2} />{t('Commit & sync')}</AlertDialog.Action>
               {:else}
-                <AlertDialog.Action class="btn primary" onclick={() => leave('commit', remember)}>{t('Commit')}</AlertDialog.Action>
+                <AlertDialog.Action class="btn primary" onclick={() => leave('commit', remember, message)}>{t('Commit')}</AlertDialog.Action>
               {/if}
             {/if}
           </div>
@@ -400,6 +404,19 @@
     color: var(--muted);
   }
   .dlg-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  .dlg-body { flex: 1; min-width: 0; }
+  .dlg-msg {
+    display: block;
+    width: 100%;
+    margin-top: 12px;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    background: var(--bg);
+    color: var(--fg);
+    font: 400 13px/1.3 var(--text);
+  }
+  .dlg-msg:focus { outline: none; border-color: var(--orange); }
   .dlg-busy { display: flex; align-items: center; gap: 12px; }
   .dlg-busy :global(.dlg-title) { margin: 0; }
   :global(.dlg .btn) {

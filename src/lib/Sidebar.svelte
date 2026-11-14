@@ -16,6 +16,13 @@
   // `git@github.com:me/notes.git` or `https://github.com/me/notes` → github.com
   const host = (url: string) => url.match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^:/]+)/i)?.[1] ?? url
 
+  let commitOpen = $state(false)
+  let message = $state('')
+  function commit(push: boolean) {
+    commitOpen = false
+    sync(message, push).then(() => (message = '')).catch(() => {})
+  }
+
   function saveRemote(url: string) {
     remoteOpen = false
     setRemote(url).catch(() => {})
@@ -109,9 +116,27 @@
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      <Tip class={app.syncing ? 'icon-btn spin' : 'icon-btn'} label={t(app.git.remote ? 'Synchroniser (commit + push)' : 'Commit les notes')} disabled={app.syncing} onclick={sync}>
-        <RefreshCw size={14} strokeWidth={1.5} />
-      </Tip>
+      <Popover.Root bind:open={commitOpen}>
+        <Popover.Trigger disabled={app.syncing}>
+          {#snippet child({ props })}
+            <Tip {...props} class={app.syncing ? 'icon-btn spin' : 'icon-btn'} label={t(app.git?.remote ? 'Synchroniser (commit + push)' : 'Commit les notes')}>
+              <RefreshCw size={14} strokeWidth={1.5} />
+            </Tip>
+          {/snippet}
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content class="menu remote" side="top" sideOffset={6} collisionPadding={8}>
+            <form onsubmit={(e) => { e.preventDefault(); commit(!!app.git?.remote) }}>
+              <label for="commit-msg">{t('Message de commit')}</label>
+              <input id="commit-msg" bind:value={message} placeholder="traym: sync" spellcheck="false" autocomplete="off" />
+              <div class="row">
+                {#if app.git?.remote}<button type="button" onclick={() => commit(false)}>{t('Commit')}</button>{/if}
+                <button type="submit" class="primary">{t(app.git?.remote ? 'Commit & sync' : 'Commit')}</button>
+              </div>
+            </form>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
     {:else}
       <button class="label link" onclick={gitInit}>{t('Activer le suivi git')}</button>
     {/if}
@@ -180,6 +205,7 @@
     color: var(--fg);
     font: 12.5px/1.4 var(--mono);
   }
+  :global(.remote input#commit-msg) { font-family: var(--text); }
   :global(.remote input:focus) { outline: none; border-color: var(--orange); }
   :global(.remote .row) { margin-top: 8px; display: flex; justify-content: flex-end; gap: 6px; }
   :global(.remote button) { padding: 6px 10px; border-radius: var(--r); font: 600 12.5px/1 var(--display); color: var(--muted); }

@@ -183,6 +183,7 @@ const en: Record<string, string> = {
   'Avec un dépôt git distant. Sans, traym enregistre simplement dans git.': 'With a remote git repository. Without one, traym just commits to git.',
   Demander: 'Ask',
   'Avant de quitter': 'Before quitting',
+  'Message de commit': 'Commit message',
   'Commit…': 'Committing…',
   'Le commit a échoué': 'The commit failed',
   'Commit les notes': 'Commit notes',

@@ -88,22 +88,25 @@ pub async fn set_remote(root: &Path, url: &str) -> Res<()> {
     .map(drop)
 }
 
-/// Commit the notes. Refused mid-conflict: `add` would commit the markers.
-pub async fn commit(root: &Path) -> Res<()> {
+pub const DEFAULT_MESSAGE: &str = "traym: sync";
+
+/// Commit the notes (an empty message means the default one). Refused mid-conflict: `add` would commit the markers.
+pub async fn commit(root: &Path, message: &str) -> Res<()> {
+    let message = if message.trim().is_empty() { DEFAULT_MESSAGE } else { message.trim() };
     if !conflicts(root).await?.is_empty() {
         return Err("conflicts need resolving".into());
     }
     // no change, no add: `add` fails on a pathspec that matches nothing (a vault without any note)
     if !note_changes(root).await?.is_empty() {
         git(root, &["add", "-A", "--", NOTES]).await?;
-        git(root, &["commit", "-m", "traym: sync"]).await?;
+        git(root, &["commit", "-m", message]).await?;
     }
     Ok(())
 }
 
 /// Commit the notes; with `push`, also send it to the remote when there is one.
-pub async fn sync(root: &Path, push: bool) -> Res<()> {
-    commit(root).await?;
+pub async fn sync(root: &Path, push: bool, message: &str) -> Res<()> {
+    commit(root, message).await?;
     if let Some(r) = remote(root).await?.filter(|_| push) {
         net(root, &["push", "-u", &r, "HEAD"]).await?;
     }
@@ -114,7 +117,7 @@ pub async fn sync(root: &Path, push: bool) -> Res<()> {
 /// it shows up in `status` and locks the vault until resolved.
 pub async fn pull(root: &Path) -> Res<()> {
     let Some(r) = remote(root).await? else { return Ok(()) };
-    commit(root).await?;
+    commit(root, "").await?;
     net(root, &["fetch", &r]).await?;
     let branch = git(root, &["symbolic-ref", "--short", "HEAD"]).await?;
     let theirs = format!("{r}/{}", branch.trim());
@@ -173,15 +176,17 @@ mod tests {
         init(root).await.unwrap();
         ident(root).await;
         std::fs::write(root.join("big.rpm"), "x").unwrap(); // not a note: never counted nor committed
-        sync(root, true).await.unwrap(); // nothing to commit, even with no note at all
+        sync(root, true, "").await.unwrap(); // nothing to commit, even with no note at all
         std::fs::create_dir(root.join("New folder")).unwrap();
         std::fs::write(root.join("New folder/a.md"), "x").unwrap();
         assert_eq!(status(root).await.unwrap().unwrap().changes, 1);
-        sync(root, true).await.unwrap();
+        sync(root, true, "  ma note  ").await.unwrap();
         assert_eq!(git(root, &["ls-files"]).await.unwrap(), "New folder/a.md\n");
+        assert_eq!(git(root, &["log", "-1", "--format=%s"]).await.unwrap(), "ma note\n");
         std::fs::remove_file(root.join("New folder/a.md")).unwrap();
-        sync(root, true).await.unwrap(); // a deleted note is committed too
+        sync(root, true, "").await.unwrap(); // a deleted note is committed too
         assert_eq!(git(root, &["ls-files"]).await.unwrap(), "");
+        assert_eq!(git(root, &["log", "-1", "--format=%s"]).await.unwrap(), "traym: sync\n");
         pull(root).await.unwrap(); // no remote: nothing to do
         let s = status(root).await.unwrap().unwrap();
         assert_eq!((s.changes, s.remote, s.conflicts.len()), (0, None, 0));
@@ -204,10 +209,10 @@ mod tests {
 
         pull(&a).await.unwrap(); // empty remote
         std::fs::write(a.join("a.md"), "base\n").unwrap();
-        sync(&a, false).await.unwrap(); // save only: committed here, nothing on the remote
+        sync(&a, false, "").await.unwrap(); // save only: committed here, nothing on the remote
         assert!(git(d.path(), &["ls-remote", url]).await.unwrap().trim().is_empty());
         assert!(status(&a).await.unwrap().unwrap().changes == 0);
-        sync(&a, true).await.unwrap();
+        sync(&a, true, "").await.unwrap();
         assert!(!git(d.path(), &["ls-remote", url]).await.unwrap().trim().is_empty());
 
         pull(&c).await.unwrap(); // unborn branch picks up the remote
@@ -216,12 +221,12 @@ mod tests {
         git(d.path(), &["clone", "-q", url, b.to_str().unwrap()]).await.unwrap();
         ident(&b).await;
         std::fs::write(b.join("a.md"), "theirs\n").unwrap();
-        sync(&b, true).await.unwrap();
+        sync(&b, true, "").await.unwrap();
 
         std::fs::write(a.join("a.md"), "ours\n").unwrap();
         pull(&a).await.unwrap();
         assert_eq!(status(&a).await.unwrap().unwrap().conflicts, ["a.md"]);
-        assert!(commit(&a).await.is_err());
+        assert!(commit(&a, "").await.is_err());
         assert!(resolve(&a, "a.md", "manual").await.is_err());
 
         abort(&a).await.unwrap();
@@ -231,7 +236,7 @@ mod tests {
         let s = status(&a).await.unwrap().unwrap();
         assert_eq!((s.changes, s.conflicts.len()), (0, 0));
         assert_eq!(std::fs::read_to_string(a.join("a.md")).unwrap(), "theirs\n");
-        sync(&a, true).await.unwrap(); // merge commit pushes cleanly
+        sync(&a, true, "").await.unwrap(); // merge commit pushes cleanly
 
         set_remote(&a, "").await.unwrap();
         assert_eq!(status(&a).await.unwrap().unwrap().remote, None);
