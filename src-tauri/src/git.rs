@@ -25,7 +25,7 @@ async fn git(root: &Path, args: &[&str]) -> Res<String> {
         .kill_on_drop(true)
         .output()
         .await
-        .map_err(|e| format!("git introuvable : {e}"))?;
+        .map_err(|e| format!("git not found: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
@@ -37,7 +37,7 @@ async fn git(root: &Path, args: &[&str]) -> Res<String> {
 async fn net(root: &Path, args: &[&str]) -> Res<String> {
     tokio::time::timeout(Duration::from_secs(30), git(root, args))
         .await
-        .map_err(|_| "le dépôt distant ne répond pas".to_string())?
+        .map_err(|_| "the remote is not responding".to_string())?
 }
 
 async fn remote(root: &Path) -> Res<Option<String>> {
@@ -69,7 +69,7 @@ pub async fn init(root: &Path) -> Res<()> {
 pub async fn set_remote(root: &Path, url: &str) -> Res<()> {
     let url = url.trim();
     if url.starts_with('-') {
-        return Err("url invalide".into());
+        return Err("invalid url".into());
     }
     match (remote(root).await?, url.is_empty()) {
         (Some(r), true) => git(root, &["remote", "remove", &r]).await,
@@ -83,7 +83,7 @@ pub async fn set_remote(root: &Path, url: &str) -> Res<()> {
 /// Commit everything. Refused mid-conflict: `add -A` would commit the markers.
 pub async fn commit(root: &Path) -> Res<()> {
     if !conflicts(root).await?.is_empty() {
-        return Err("des conflits sont à résoudre".into());
+        return Err("conflicts need resolving".into());
     }
     git(root, &["add", "-A"]).await?;
     if !git(root, &["status", "--porcelain"]).await?.is_empty() {
@@ -130,10 +130,10 @@ pub async fn resolve(root: &Path, path: &str, side: &str) -> Res<()> {
         "manual" => {
             let text = std::fs::read_to_string(vault::resolve(root, path)?).unwrap_or_default();
             if text.lines().any(|l| l.starts_with("<<<<<<<") || l.starts_with(">>>>>>>")) {
-                return Err(format!("{path} contient encore des marqueurs de conflit"));
+                return Err(format!("{path} still contains conflict markers"));
             }
         }
-        _ => return Err("résolution inconnue".into()),
+        _ => return Err("unknown resolution".into()),
     }
     git(root, &["add", "-A", "--", path]).await?;
     if conflicts(root).await?.is_empty() {

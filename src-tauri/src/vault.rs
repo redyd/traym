@@ -24,7 +24,7 @@ pub struct Node {
 pub fn resolve(root: &Path, rel: &str) -> Res<PathBuf> {
     let p = Path::new(rel);
     if p.components().any(|c| !matches!(c, Component::Normal(_))) {
-        return Err(format!("chemin invalide : {rel}"));
+        return Err(format!("invalid path: {rel}"));
     }
     let full = root.join(p);
     let root_c = root.canonicalize().map_err(err)?;
@@ -33,7 +33,7 @@ pub fn resolve(root: &Path, rel: &str) -> Res<PathBuf> {
         probe = probe.parent().unwrap_or(root);
     }
     if !probe.canonicalize().map_err(err)?.starts_with(&root_c) {
-        return Err(format!("chemin hors du vault : {rel}"));
+        return Err(format!("path outside the vault: {rel}"));
     }
     Ok(full)
 }
@@ -88,7 +88,7 @@ pub fn write(root: &Path, rel: &str, content: &str) -> Res<()> {
 
 pub fn create_note(root: &Path, rel: &str, content: &str) -> Res<()> {
     if resolve(root, rel)?.exists() {
-        return Err(format!("existe déjà : {rel}"));
+        return Err(format!("already exists: {rel}"));
     }
     write(root, rel, content)
 }
@@ -100,10 +100,10 @@ pub fn create_folder(root: &Path, rel: &str) -> Res<()> {
 pub fn rename(root: &Path, from: &str, to: &str) -> Res<()> {
     let (a, b) = (resolve(root, from)?, resolve(root, to)?);
     if b.exists() {
-        return Err(format!("existe déjà : {to}"));
+        return Err(format!("already exists: {to}"));
     }
     if b.starts_with(&a) {
-        return Err("impossible de déplacer un dossier dans lui-même".into());
+        return Err("cannot move a folder into itself".into());
     }
     if let Some(parent) = b.parent() {
         fs::create_dir_all(parent).map_err(err)?;
@@ -115,7 +115,7 @@ pub fn rename(root: &Path, from: &str, to: &str) -> Res<()> {
 pub fn trash(root: &Path, rel: &str) -> Res<()> {
     let p = resolve(root, rel)?;
     if p == root {
-        return Err("impossible de supprimer le vault".into());
+        return Err("cannot delete the vault".into());
     }
     trash::delete(p).map_err(err)
 }
@@ -124,8 +124,8 @@ pub fn edit(root: &Path, rel: &str, old: &str, new: &str) -> Res<()> {
     let text = read(root, rel)?;
     match text.matches(old).count() {
         1 => write(root, rel, &text.replacen(old, new, 1)),
-        0 => Err("texte introuvable dans la note".into()),
-        n => Err(format!("texte trouvé {n} fois, précise davantage")),
+        0 => Err("text not found in the note".into()),
+        n => Err(format!("text found {n} times, be more specific")),
     }
 }
 
