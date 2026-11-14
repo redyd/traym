@@ -277,14 +277,11 @@ fn main() {
                 settings_path,
             });
             tauri::async_runtime::spawn(mcp::run(listener, core.clone()));
-            // the page shows the window once themed; if it never does (crash, slow start), don't stay invisible
+            // the window paints before the page: the light neutral of index.html's boot screen on a light system
             let win = app.get_webview_window("main").ok_or("no main window")?;
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                if !win.is_visible().unwrap_or(true) {
-                    let _ = win.show();
-                }
-            });
+            if win.theme().is_ok_and(|t| t == tauri::Theme::Light) {
+                let _ = win.set_background_color(Some(tauri::window::Color(0xf4, 0xf4, 0xf5, 0xff)));
+            }
             app.manage(core);
             Ok(())
         })

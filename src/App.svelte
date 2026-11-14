@@ -10,9 +10,6 @@
   import Sidebar from './lib/Sidebar.svelte'
   import Editor from './lib/Editor.svelte'
   import AgentPanel from './lib/AgentPanel.svelte'
-  import Palette from './lib/Palette.svelte'
-  import Conflicts from './lib/Conflicts.svelte'
-  import SettingsPage from './lib/Settings.svelte'
   import { t, lang } from './lib/i18n.svelte'
   import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, leave, loadSettings, ACCENTS } from './lib/store.svelte'
 
@@ -119,8 +116,12 @@
       .catch(() => (app.vault = null))
       .finally(() => {
         ready = true
-        // the window starts hidden (tauri.conf.json): shown once the first themed frame is painted
-        requestAnimationFrame(() => requestAnimationFrame(() => win.show()))
+        // index.html's neutral boot screen covers the start: fade it out once the first real frame is painted
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const boot = document.getElementById('boot')
+          boot?.classList.add('gone')
+          setTimeout(() => boot?.remove(), 300)
+        }))
       })
   })
 
@@ -192,7 +193,7 @@
   {#if !ready}
     <div class="body"></div>
   {:else if app.vault && locked}
-    <Conflicts />
+    {#await import('./lib/Conflicts.svelte') then { default: Conflicts }}<Conflicts />{/await}
   {:else if app.vault}
     <main
       class="body grid"
@@ -222,9 +223,10 @@
   {/if}
 
   <!-- over the main view, which stays mounted: the chat and the open note survive a trip to Settings -->
-  {#if app.settings}<SettingsPage onclose={() => (app.settings = false)} />{/if}
+  <!-- rarely opened: loaded on first use, so the start doesn't parse them -->
+  {#if app.settings}{#await import('./lib/Settings.svelte') then { default: SettingsPage }}<SettingsPage onclose={() => (app.settings = false)} />{/await}{/if}
 
-  {#if app.palette && !locked}<Palette {commands} />{/if}
+  {#if app.palette && !locked}{#await import('./lib/Palette.svelte') then { default: Palette }}<Palette {commands} />{/await}{/if}
 
   <AlertDialog.Root open={!!app.closing} onOpenChange={(o) => !o && app.closing !== 'busy' && (app.closing = null)}>
     <AlertDialog.Portal>

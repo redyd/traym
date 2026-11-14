@@ -4,8 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>traym</title>
+    <!-- boot screen: plain HTML/CSS, painted before any script loads; neutral, since the theme isn't known yet -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #18181b; }
+      #boot {
+        position: fixed; inset: 0; z-index: 1000;
+        display: grid; place-items: center;
+        background: #18181b; color: #a1a1aa;
+        font: 600 15px/1 system-ui, sans-serif; letter-spacing: .02em;
+        transition: opacity .25s ease;
+      }
+      #boot.gone { opacity: 0; pointer-events: none; }
+      #boot div { display: grid; justify-items: center; gap: 14px; }
+      #boot i { width: 18px; height: 18px; border: 2px solid #3f3f46; border-top-color: #a1a1aa; border-radius: 50%; animation: boot .8s linear infinite; }
+      @keyframes boot { to { transform: rotate(360deg); } }
+      @media (prefers-color-scheme: light) {
+        html, body, #boot { background: #f4f4f5; }
+        #boot { color: #52525b; }
+        #boot i { border-color: #d4d4d8; border-top-color: #52525b; }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot"><div>traym<i></i></div></div>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

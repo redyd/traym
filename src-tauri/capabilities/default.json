@@ -8,7 +8,6 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-destroy",
-    "core:window:allow-show",
     "dialog:allow-open"
   ]
 }
