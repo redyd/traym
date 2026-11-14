@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="104" fill="#1a1a1a"/>
+  <g fill="#ff5722" transform="translate(0 -18)">
+    <!-- right arm + stem: one piece, beveled ends -->
+    <path d="M240 112 H356 L404 160 V200 H320 V356 L240 436 Z"/>
+    <!-- left arm: a separate blade, its tail running beside the stem -->
+    <path d="M108 160 L156 112 H212 V276 L160 328 V200 H108 Z"/>
+  </g>
+</svg>

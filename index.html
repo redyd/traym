@@ -15,7 +15,7 @@
         transition: opacity .25s ease;
       }
       #boot.gone { opacity: 0; pointer-events: none; }
-      #boot div { display: grid; justify-items: center; gap: 14px; }
+      #boot div { display: grid; justify-items: center; gap: 28px; }
       /* indeterminate bar: the pull has no measurable progress */
       #boot i { width: 160px; height: 3px; border-radius: 3px; background: #3f3f46; overflow: hidden; position: relative; }
       #boot i::after { content: ''; position: absolute; inset: 0; width: 40%; border-radius: 3px; background: #a1a1aa; animation: boot 1.1s ease-in-out infinite; }
@@ -29,7 +29,11 @@
     </style>
   </head>
   <body>
-    <div id="boot"><div>traym<i></i></div></div>
+    <div id="boot"><div>
+      <!-- the logo's glyph (src-tauri/icons/logo.svg) without its tile -->
+      <svg viewBox="108 94 296 324" width="56" height="61" fill="#ff5722" aria-label="traym"><path d="M240 94 H356 L404 142 V182 H320 V338 L240 418 Z"/><path d="M108 142 L156 94 H212 V258 L160 310 V182 H108 Z"/></svg>
+      <i></i>
+    </div></div>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
