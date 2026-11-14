@@ -14,6 +14,7 @@
   import TableIcon, { type TableOp } from './TableIcon.svelte'
   import { extensions, split, media } from './schema'
   import Tip from './Tip.svelte'
+  import { t as tr } from './i18n.svelte'
   import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists } from './store.svelte'
 
   let host: HTMLDivElement
@@ -100,10 +101,10 @@
     { key: 'h2', label: 'Titre 2', icon: Heading2, run: () => cmd().toggleHeading({ level: 2 }).run(), active: is('heading', { level: 2 }) },
     { key: 'h3', label: 'Titre 3', icon: Heading3, run: () => cmd().toggleHeading({ level: 3 }).run(), active: is('heading', { level: 3 }) },
     null,
-    { key: 'bold', label: `Gras (${mod}+B)`, icon: Bold, run: () => mark('bold'), active: is('bold') },
-    { key: 'italic', label: `Italique (${mod}+I)`, icon: Italic, run: () => mark('italic'), active: is('italic') },
-    { key: 'strike', label: `Barré (${mod}+Maj+S)`, icon: Strikethrough, run: () => mark('strike'), active: is('strike') },
-    { key: 'code', label: `Code (${mod}+E)`, icon: Code, run: () => mark('code'), active: is('code') },
+    { key: 'bold', label: 'Gras ({mod}+B)', icon: Bold, run: () => mark('bold'), active: is('bold') },
+    { key: 'italic', label: 'Italique ({mod}+I)', icon: Italic, run: () => mark('italic'), active: is('italic') },
+    { key: 'strike', label: 'Barré ({mod}+Maj+S)', icon: Strikethrough, run: () => mark('strike'), active: is('strike') },
+    { key: 'code', label: 'Code ({mod}+E)', icon: Code, run: () => mark('code'), active: is('code') },
     null,
     { key: 'codeBlock', label: 'Bloc de code', icon: SquareCode, run: () => cmd().toggleCodeBlock().run(), active: is('codeBlock') },
     { key: 'quote', label: 'Citation', icon: TextQuote, run: () => cmd().toggleBlockquote().run(), active: is('blockquote') },
@@ -180,7 +181,7 @@
     try {
       editor!.view.pasteText(await navigator.clipboard.readText())
     } catch {
-      flash(`Collage impossible depuis le menu ici : utilise ${mod}+V`)
+      flash(tr('Collage impossible depuis le menu ici : utilise {mod}+V', { mod }))
     }
   }
 
@@ -368,7 +369,7 @@
     const to = join(parent(from), name + '.md')
     if (!name || to === from) return void (input.value = title(from))
     if (exists(to)) {
-      flash(`« ${name} » existe déjà ici`)
+      flash(tr('« {name} » existe déjà ici', { name }))
       return void (input.value = title(from))
     }
     await move(from, to)
@@ -423,7 +424,7 @@
 {#snippet buttons(table: boolean)}
   {#each tools as t}
     {#if t}
-      <Tip class={on.includes(t.key) ? 'icon-btn on' : 'icon-btn'} aria-pressed={on.includes(t.key)} label={t.label} onclick={() => t.run()}><t.icon size={15} strokeWidth={1.6} /></Tip>
+      <Tip class={on.includes(t.key) ? 'icon-btn on' : 'icon-btn'} aria-pressed={on.includes(t.key)} label={tr(t.label, { mod })} onclick={() => t.run()}><t.icon size={15} strokeWidth={1.6} /></Tip>
     {:else}
       <span class="sep"></span>
     {/if}
@@ -432,7 +433,7 @@
     <span class="sep"></span>
     {#each tableTools as t, i}
       {#if i === 3 || i === 6}<span class="sep thin"></span>{/if}
-      <Tip class={t.danger ? 'icon-btn danger' : 'icon-btn'} label={t.label} onclick={() => t.run(cmd()).run()}>{@render icon(t, 15)}</Tip>
+      <Tip class={t.danger ? 'icon-btn danger' : 'icon-btn'} label={tr(t.label)} onclick={() => t.run(cmd()).run()}>{@render icon(t, 15)}</Tip>
     {/each}
   {/if}
 {/snippet}
@@ -443,13 +444,13 @@
 
 {#snippet tableMenu(k: 'row' | 'col', h: Hover, style: string)}
   <DropdownMenu.Root bind:open={() => menu === k, (o) => openMenu(k, o)}>
-    <DropdownMenu.Trigger class={menu === k ? `grip ${k} open` : `grip ${k}`} aria-label={k === 'row' ? 'Options de la ligne' : 'Options de la colonne'} {style}>
+    <DropdownMenu.Trigger class={menu === k ? `grip ${k} open` : `grip ${k}`} aria-label={tr(k === 'row' ? 'Options de la ligne' : 'Options de la colonne')} {style}>
       {#if k === 'row'}<GripVertical size={12} />{:else}<GripHorizontal size={12} />{/if}
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal>
       <DropdownMenu.Content class="menu" side={k === 'row' ? 'left' : 'bottom'} align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={(e) => e.preventDefault()}>
         {#each k === 'row' ? rowMenu : colMenu as it}
-          <DropdownMenu.Item class={it.danger ? 'danger' : ''} onSelect={() => at(h.cell, it.run)}>{@render icon(it, 14)}{it.label}</DropdownMenu.Item>
+          <DropdownMenu.Item class={it.danger ? 'danger' : ''} onSelect={() => at(h.cell, it.run)}>{@render icon(it, 14)}{tr(it.label)}</DropdownMenu.Item>
         {/each}
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
@@ -460,7 +461,7 @@
 <section class="editor" class:empty={!app.current}>
   {#if app.current}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="toolbar" role="toolbar" aria-label="Mise en forme" tabindex="-1" onmousedown={(e) => e.preventDefault()}>
+    <div class="toolbar" role="toolbar" aria-label={tr('Mise en forme')} tabindex="-1" onmousedown={(e) => e.preventDefault()}>
       {@render buttons(true)}
     </div>
   {/if}
@@ -475,7 +476,7 @@
         bind:this={titleEl}
         value={title(app.current)}
         spellcheck="false"
-        aria-label="Titre de la note"
+        aria-label={tr('Titre de la note')}
         onkeydown={(e) => {
           if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); editor?.commands.focus('start') }
           if (e.key === 'Escape') { e.currentTarget.value = title(app.current!); editor?.commands.focus() }
@@ -489,41 +490,41 @@
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content class="menu" collisionPadding={8} onCloseAutoFocus={(e) => { e.preventDefault(); editor?.commands.focus() }}>
-          <ContextMenu.Item disabled={!picked} onSelect={() => clip('cut')}><Scissors size={14} strokeWidth={1.6} />Couper<kbd>{mod}+X</kbd></ContextMenu.Item>
-          <ContextMenu.Item disabled={!picked} onSelect={() => clip('copy')}><Copy size={14} strokeWidth={1.6} />Copier<kbd>{mod}+C</kbd></ContextMenu.Item>
-          <ContextMenu.Item onSelect={pasteClip}><ClipboardPaste size={14} strokeWidth={1.6} />Coller<kbd>{mod}+V</kbd></ContextMenu.Item>
+          <ContextMenu.Item disabled={!picked} onSelect={() => clip('cut')}><Scissors size={14} strokeWidth={1.6} />{tr('Couper')}<kbd>{mod}+X</kbd></ContextMenu.Item>
+          <ContextMenu.Item disabled={!picked} onSelect={() => clip('copy')}><Copy size={14} strokeWidth={1.6} />{tr('Copier')}<kbd>{mod}+C</kbd></ContextMenu.Item>
+          <ContextMenu.Item onSelect={pasteClip}><ClipboardPaste size={14} strokeWidth={1.6} />{tr('Coller')}<kbd>{mod}+V</kbd></ContextMenu.Item>
           {#if picked}
             <ContextMenu.Separator />
             {#each ['bold', 'italic', 'strike', 'code'].map(tool) as t}
-              <ContextMenu.Item class={on.includes(t.key) ? 'on' : ''} onSelect={() => t.run()}><t.icon size={14} strokeWidth={1.6} />{t.label.replace(/ \(.*/, '')}<kbd>{t.label.match(/\((.*)\)/)?.[1]}</kbd></ContextMenu.Item>
+              <ContextMenu.Item class={on.includes(t.key) ? 'on' : ''} onSelect={() => t.run()}><t.icon size={14} strokeWidth={1.6} />{tr(t.label, { mod }).replace(/ \(.*/, '')}<kbd>{tr(t.label, { mod }).match(/\((.*)\)/)?.[1]}</kbd></ContextMenu.Item>
             {/each}
           {/if}
           <ContextMenu.Separator />
           <ContextMenu.Sub>
-            <ContextMenu.SubTrigger><Pilcrow size={14} strokeWidth={1.6} />Transformer en<ChevronRight class="sub" size={13} /></ContextMenu.SubTrigger>
+            <ContextMenu.SubTrigger><Pilcrow size={14} strokeWidth={1.6} />{tr('Transformer en')}<ChevronRight class="sub" size={13} /></ContextMenu.SubTrigger>
             <ContextMenu.SubContent class="menu" collisionPadding={8}>
-              <ContextMenu.Item class={on.some((k) => blocks.some((b) => b.key === k)) ? '' : 'on'} onSelect={() => cmd().setParagraph().run()}><Pilcrow size={14} strokeWidth={1.6} />Texte</ContextMenu.Item>
+              <ContextMenu.Item class={on.some((k) => blocks.some((b) => b.key === k)) ? '' : 'on'} onSelect={() => cmd().setParagraph().run()}><Pilcrow size={14} strokeWidth={1.6} />{tr('Texte')}</ContextMenu.Item>
               {#each blocks as t}
-                <ContextMenu.Item class={on.includes(t.key) ? 'on' : ''} onSelect={() => t.run()}><t.icon size={14} strokeWidth={1.6} />{t.label}</ContextMenu.Item>
+                <ContextMenu.Item class={on.includes(t.key) ? 'on' : ''} onSelect={() => t.run()}><t.icon size={14} strokeWidth={1.6} />{tr(t.label)}</ContextMenu.Item>
               {/each}
             </ContextMenu.SubContent>
           </ContextMenu.Sub>
           {#if on.includes('table')}
             <ContextMenu.Sub>
-              <ContextMenu.SubTrigger><Table size={14} strokeWidth={1.6} />Tableau<ChevronRight class="sub" size={13} /></ContextMenu.SubTrigger>
+              <ContextMenu.SubTrigger><Table size={14} strokeWidth={1.6} />{tr('Tableau')}<ChevronRight class="sub" size={13} /></ContextMenu.SubTrigger>
               <ContextMenu.SubContent class="menu" collisionPadding={8}>
                 {#each tableTools as t, i}
                   {#if i === 3 || i === 6}<ContextMenu.Separator />{/if}
-                  <ContextMenu.Item class={t.danger ? 'danger' : ''} onSelect={() => t.run(cmd()).run()}>{@render icon(t, 14)}{t.label}</ContextMenu.Item>
+                  <ContextMenu.Item class={t.danger ? 'danger' : ''} onSelect={() => t.run(cmd()).run()}>{@render icon(t, 14)}{tr(t.label)}</ContextMenu.Item>
                 {/each}
               </ContextMenu.SubContent>
             </ContextMenu.Sub>
           {:else}
-            <ContextMenu.Item onSelect={() => tool('table').run()}><Table size={14} strokeWidth={1.6} />Insérer un tableau</ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => tool('table').run()}><Table size={14} strokeWidth={1.6} />{tr('Insérer un tableau')}</ContextMenu.Item>
           {/if}
-          <ContextMenu.Item onSelect={() => tool('image').run()}><Image size={14} strokeWidth={1.6} />Insérer une image</ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => tool('image').run()}><Image size={14} strokeWidth={1.6} />{tr('Insérer une image')}</ContextMenu.Item>
           <ContextMenu.Separator />
-          <ContextMenu.Item onSelect={() => cmd().selectAll().run()}><TextSelect size={14} strokeWidth={1.6} />Tout sélectionner<kbd>{mod}+A</kbd></ContextMenu.Item>
+          <ContextMenu.Item onSelect={() => cmd().selectAll().run()}><TextSelect size={14} strokeWidth={1.6} />{tr('Tout sélectionner')}<kbd>{mod}+A</kbd></ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
@@ -538,8 +539,8 @@
         {#if menu === 'col'}<div class="tsel" style:left="{h.cx}px" style:top="{h.ty}px" style:width="{h.cw}px" style:height="{h.th}px"></div>{/if}
         {@render tableMenu('row', h, `left:${h.tx - 22}px;top:${h.ry + h.rh / 2 - 10}px`)}
         {@render tableMenu('col', h, `left:${h.cx + h.cw / 2 - 10}px;top:${h.ty - 20}px`)}
-        <Tip class="add" label="Ajouter une ligne" style="left:{h.tx}px;top:{h.ty + h.th + 4}px;width:{h.tw}px;height:14px" onclick={() => at(lastRow(h.table), (c) => c.addRowAfter())}><Plus size={11} /></Tip>
-        <Tip class="add" label="Ajouter une colonne" style="left:{h.tx + h.tw + 4}px;top:{h.ty}px;width:14px;height:{h.th}px" onclick={() => at(lastCol(h.table), (c) => c.addColumnAfter())}><Plus size={11} /></Tip>
+        <Tip class="add" label={tr('Ajouter une ligne')} style="left:{h.tx}px;top:{h.ty + h.th + 4}px;width:{h.tw}px;height:14px" onclick={() => at(lastRow(h.table), (c) => c.addRowAfter())}><Plus size={11} /></Tip>
+        <Tip class="add" label={tr('Ajouter une colonne')} style="left:{h.tx + h.tw + 4}px;top:{h.ty}px;width:14px;height:{h.th}px" onclick={() => at(lastCol(h.table), (c) => c.addColumnAfter())}><Plus size={11} /></Tip>
       </div>
     {/if}
     </div>
@@ -547,23 +548,23 @@
 
   <!-- shown, hidden and placed by the bubble menu extension -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="bar" role="toolbar" aria-label="Mise en forme de la sélection" tabindex="-1" bind:this={barEl} style="visibility: hidden" onmousedown={(e) => e.preventDefault()}>
+  <div class="bar" role="toolbar" aria-label={tr('Mise en forme de la sélection')} tabindex="-1" bind:this={barEl} style="visibility: hidden" onmousedown={(e) => e.preventDefault()}>
     {@render buttons(false)}
   </div>
 
   {#if app.current}
     <footer>
-      <span>{words} {words === 1 ? 'mot' : 'mots'}</span>
-      <span class="state" class:busy={status === 'saving'}>{status === 'saved' ? 'Enregistré' : 'Enregistrement'}</span>
+      <span>{tr(words === 1 ? '{n} mot' : '{n} mots', { n: words })}</span>
+      <span class="state" class:busy={status === 'saving'}>{tr(status === 'saved' ? 'Enregistré' : 'Enregistrement')}</span>
     </footer>
   {:else}
     <div class="blank">
-      <p>Aucune note ouverte</p>
+      <p>{tr('Aucune note ouverte')}</p>
       <dl>
-        <div><dt>Ouvrir une note</dt><dd><kbd>{mod}</kbd><kbd>P</kbd></dd></div>
-        <div><dt>Nouvelle note</dt><dd><kbd>{mod}</kbd><kbd>N</kbd></dd></div>
-        <div><dt>Commandes</dt><dd><kbd>{mod}</kbd><kbd>K</kbd></dd></div>
-        <div><dt>Agent</dt><dd><kbd>{mod}</kbd><kbd>J</kbd></dd></div>
+        <div><dt>{tr('Ouvrir une note')}</dt><dd><kbd>{mod}</kbd><kbd>P</kbd></dd></div>
+        <div><dt>{tr('Nouvelle note')}</dt><dd><kbd>{mod}</kbd><kbd>N</kbd></dd></div>
+        <div><dt>{tr('Commandes')}</dt><dd><kbd>{mod}</kbd><kbd>K</kbd></dd></div>
+        <div><dt>{tr('Agent')}</dt><dd><kbd>{mod}</kbd><kbd>J</kbd></dd></div>
       </dl>
     </div>
   {/if}
@@ -599,7 +600,7 @@
   }
   .title:focus-visible { outline: none; }
 
-  .page { position: relative; max-width: 700px; margin: 0 auto; }
+  .page { position: relative; max-width: var(--page-w); margin: 0 auto; }
 
   /* table controls: faint until pointed at */
   .tbl { display: contents; }
@@ -724,7 +725,7 @@
   /* ---------- document ---------- */
   :global(.tiptap) {
     outline: none;
-    font: 400 16.5px/1.72 var(--text);
+    font: 400 var(--doc-size)/var(--doc-line) var(--text);
     color: var(--fg);
     caret-color: transparent; /* drawn by .caret */
   }

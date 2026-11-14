@@ -3,6 +3,7 @@
   import { ContextMenu, Popover } from 'bits-ui'
   import Tree from './Tree.svelte'
   import Tip from './Tip.svelte'
+  import { t } from './i18n.svelte'
   import { app, newNote, newFolder, trash, move, exists, flash, persist, sync, gitInit, setRemote, type Node } from './store.svelte'
 
   let node = $state<Node | null>(null) // what the context menu acts on: the item right-clicked, or the vault root
@@ -30,7 +31,7 @@
     const from = e.dataTransfer?.getData('text/x-traym')
     if (!from || !from.includes('/')) return
     const to = from.split('/').pop()!
-    if (exists(to)) return flash('Un élément porte déjà ce nom à la racine')
+    if (exists(to)) return flash(t('Un élément porte déjà ce nom à la racine'))
     move(from, to)
   }
 
@@ -46,8 +47,8 @@
 <aside class="sidebar">
   <header>
     <span class="vault" title={app.vault}>{vaultName}</span>
-    <Tip class="icon-btn" label="Nouvelle note" onclick={() => newNote()}><FilePlus size={15} strokeWidth={1.5} /></Tip>
-    <Tip class="icon-btn" label="Nouveau dossier" onclick={() => newFolder()}><FolderPlus size={15} strokeWidth={1.5} /></Tip>
+    <Tip class="icon-btn" label={t('Nouvelle note')} onclick={() => newNote()}><FilePlus size={15} strokeWidth={1.5} /></Tip>
+    <Tip class="icon-btn" label={t('Nouveau dossier')} onclick={() => newFolder()}><FolderPlus size={15} strokeWidth={1.5} /></Tip>
   </header>
 
   <ContextMenu.Root>
@@ -69,8 +70,8 @@
       <Tree nodes={app.tree} {onmenu} />
     {:else}
       <div class="empty">
-        <p>Ce dossier ne contient aucune note.</p>
-        <button onclick={() => newNote('')}>Créer une note</button>
+        <p>{t('Ce dossier ne contient aucune note.')}</p>
+        <button onclick={() => newNote('')}>{t('Créer une note')}</button>
       </div>
     {/if}
   </div>
@@ -78,13 +79,13 @@
   </ContextMenu.Trigger>
   <ContextMenu.Portal>
     <ContextMenu.Content class="menu" collisionPadding={8} onCloseAutoFocus={(e) => e.preventDefault()}>
-      <ContextMenu.Item onSelect={() => newNote(dirOf(node))}>Nouvelle note</ContextMenu.Item>
-      <ContextMenu.Item onSelect={() => newFolder(dirOf(node))}>Nouveau dossier</ContextMenu.Item>
+      <ContextMenu.Item onSelect={() => newNote(dirOf(node))}>{t('Nouvelle note')}</ContextMenu.Item>
+      <ContextMenu.Item onSelect={() => newFolder(dirOf(node))}>{t('Nouveau dossier')}</ContextMenu.Item>
       {#if node}
         {@const n = node}
         <ContextMenu.Separator />
-        <ContextMenu.Item onSelect={() => (app.renaming = n.path)}>Renommer</ContextMenu.Item>
-        <ContextMenu.Item class="danger" onSelect={() => trash(n.path)}>Mettre à la corbeille</ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => (app.renaming = n.path)}>{t('Renommer')}</ContextMenu.Item>
+        <ContextMenu.Item class="danger" onSelect={() => trash(n.path)}>{t('Mettre à la corbeille')}</ContextMenu.Item>
       {/if}
     </ContextMenu.Content>
   </ContextMenu.Portal>
@@ -94,32 +95,32 @@
     <GitBranch size={14} strokeWidth={1.5} />
     {#if app.git}
       <span class="label">
-        {app.git.changes ? `${app.git.changes} modification${app.git.changes > 1 ? 's' : ''}` : 'À jour'} · {app.git.remote ? host(app.git.remote) : 'local'}
+        {app.git.changes ? t(app.git.changes > 1 ? '{n} modifications' : '{n} modification', { n: app.git.changes }) : t('À jour')} · {app.git.remote ? host(app.git.remote) : t('local')}
       </span>
       <Popover.Root bind:open={remoteOpen} onOpenChange={(o) => o && (remoteUrl = app.git?.remote ?? '')}>
         <Popover.Trigger>
           {#snippet child({ props })}
-            <Tip {...props} class="icon-btn" label={app.git?.remote ?? 'Dépôt distant'}><Link size={14} strokeWidth={1.5} /></Tip>
+            <Tip {...props} class="icon-btn" label={app.git?.remote ?? t('Dépôt distant')}><Link size={14} strokeWidth={1.5} /></Tip>
           {/snippet}
         </Popover.Trigger>
         <Popover.Portal>
           <Popover.Content class="menu remote" side="top" sideOffset={6} collisionPadding={8}>
             <form onsubmit={(e) => { e.preventDefault(); saveRemote(remoteUrl) }}>
-              <label for="remote-url">Dépôt distant</label>
-              <input id="remote-url" bind:value={remoteUrl} placeholder="URL du dépôt" spellcheck="false" autocomplete="off" />
+              <label for="remote-url">{t('Dépôt distant')}</label>
+              <input id="remote-url" bind:value={remoteUrl} placeholder={t('URL du dépôt')} spellcheck="false" autocomplete="off" />
               <div class="row">
-                {#if app.git?.remote}<button type="button" onclick={() => saveRemote('')}>Retirer</button>{/if}
-                <button type="submit" class="primary" disabled={!remoteUrl.trim()}>Enregistrer</button>
+                {#if app.git?.remote}<button type="button" onclick={() => saveRemote('')}>{t('Retirer')}</button>{/if}
+                <button type="submit" class="primary" disabled={!remoteUrl.trim()}>{t('Enregistrer')}</button>
               </div>
             </form>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      <Tip class={app.syncing ? 'icon-btn spin' : 'icon-btn'} label="Synchroniser (commit + push)" disabled={app.syncing} onclick={sync}>
+      <Tip class={app.syncing ? 'icon-btn spin' : 'icon-btn'} label={t('Synchroniser (commit + push)')} disabled={app.syncing} onclick={sync}>
         <RefreshCw size={14} strokeWidth={1.5} />
       </Tip>
     {:else}
-      <button class="label link" onclick={gitInit}>Activer le suivi git</button>
+      <button class="label link" onclick={gitInit}>{t('Activer le suivi git')}</button>
     {/if}
   </footer>
 

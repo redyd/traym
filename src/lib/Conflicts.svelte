@@ -1,25 +1,26 @@
 <script lang="ts">
   import { app, resolve, abortMerge } from './store.svelte'
+  import { t } from './i18n.svelte'
 </script>
 
 <main class="conflicts">
-  <h1>Conflits de synchronisation</h1>
+  <h1>{t('Conflits de synchronisation')}</h1>
   <p>
-    Ces fichiers ont changé ici et sur le dépôt distant. Les notes restent fermées tant que chacun n'est pas résolu.
-    Pour fusionner à la main, éditez les blocs <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> … <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code>
-    dans un autre éditeur, puis « Résolu à la main ».
+    {t("Ces fichiers ont changé ici et sur le dépôt distant. Les notes restent fermées tant que chacun n'est pas résolu.")}
+    {t('Pour fusionner à la main, éditez les blocs')} <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> … <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code>
+    {t('dans un autre éditeur, puis « Résolu à la main ».')}
   </p>
   <ul>
     {#each app.git?.conflicts ?? [] as path (path)}
       <li>
         <span class="path" title={path}>{path}</span>
-        <button disabled={app.syncing} onclick={() => resolve(path, 'ours')}>Garder ma version</button>
-        <button disabled={app.syncing} onclick={() => resolve(path, 'theirs')}>Garder la version distante</button>
-        <button disabled={app.syncing} onclick={() => resolve(path, 'manual')}>Résolu à la main</button>
+        <button disabled={app.syncing} onclick={() => resolve(path, 'ours')}>{t('Garder ma version')}</button>
+        <button disabled={app.syncing} onclick={() => resolve(path, 'theirs')}>{t('Garder la version distante')}</button>
+        <button disabled={app.syncing} onclick={() => resolve(path, 'manual')}>{t('Résolu à la main')}</button>
       </li>
     {/each}
   </ul>
-  <button class="abort" disabled={app.syncing} onclick={abortMerge}>Annuler la fusion</button>
+  <button class="abort" disabled={app.syncing} onclick={abortMerge}>{t('Annuler la fusion')}</button>
 </main>
 
 <style>

@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { SvelteSet } from 'svelte/reactivity'
 import { toast } from 'svelte-sonner'
+import { t, i18n } from './i18n.svelte'
 
 export type Node = { name: string; path: string; dir: boolean; children: Node[] }
 
@@ -20,6 +21,8 @@ export const app = $state({
   renaming: null as string | null,
   fresh: null as string | null, // just-created note: editor focuses its title
   theme: (ls.get('theme') ?? 'system') as 'system' | 'light' | 'dark',
+  density: (ls.get('density') ?? 'normal') as 'compact' | 'normal' | 'large',
+  settings: false, // the Settings page replaces the main view while open
   sidebar: ls.get('sidebar') !== '0',
   sidebarW: Number(ls.get('sidebarW') ?? 248),
   agent: ls.get('agentOpen') === '1',
@@ -43,6 +46,8 @@ export const flash = (msg: string) => toast.error(msg)
 export function persist() {
   if (app.vault) ls.set('vault', app.vault)
   ls.set('theme', app.theme)
+  ls.set('density', app.density)
+  ls.set('lang', i18n.lang)
   ls.set('sidebar', app.sidebar ? '1' : '0')
   ls.set('sidebarW', String(app.sidebarW))
   ls.set('agentOpen', app.agent ? '1' : '0')
@@ -132,7 +137,7 @@ function unique(dir: string, base: string, ext: string) {
 }
 
 export async function newNote(dir = app.current ? parent(app.current) : '') {
-  const path = unique(dir, 'Sans titre', '.md')
+  const path = unique(dir, t('Sans titre'), '.md')
   await call('create_note', { path })
   if (dir) app.open.add(dir)
   await refresh()
@@ -142,7 +147,7 @@ export async function newNote(dir = app.current ? parent(app.current) : '') {
 }
 
 export async function newFolder(dir = '') {
-  const path = unique(dir, 'Nouveau dossier', '')
+  const path = unique(dir, t('Nouveau dossier'), '')
   await call('create_folder', { path })
   if (dir) app.open.add(dir)
   await refresh()
@@ -189,3 +194,18 @@ export const onDiskChange = (cb: (paths: string[]) => void) =>
 
 export const isMac = navigator.platform.toLowerCase().includes('mac')
 export const mod = isMac ? '⌘' : 'Ctrl'
+
+// settings the backend keeps (custom AI providers, external MCP access), see src-tauri/src/settings.rs
+export type Provider = { id: string; name: string; baseUrl: string; apiKey: string }
+export type BackendSettings = { providers: Provider[]; mcpExternal: boolean; mcpToken: string }
+export const backend = $state({ settings: { providers: [], mcpExternal: false, mcpToken: '' } as BackendSettings, mcpUrl: '' })
+
+export async function loadSettings() {
+  const r = await invoke<{ settings: BackendSettings; mcpUrl: string }>('settings_get')
+  backend.settings = r.settings
+  backend.mcpUrl = r.mcpUrl
+}
+
+export async function saveSettings(s: BackendSettings) {
+  backend.settings = await call<BackendSettings>('settings_set', { settings: s })
+}

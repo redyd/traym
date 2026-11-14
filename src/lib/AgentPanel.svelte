@@ -1,27 +1,31 @@
 <script lang="ts">
   import Tip from './Tip.svelte'
   import { DropdownMenu } from 'bits-ui'
-  import { onMount, tick } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import { listen } from '@tauri-apps/api/event'
   import { invoke } from '@tauri-apps/api/core'
   import { marked } from 'marked'
   import DOMPurify from 'dompurify'
   import { ArrowUp, Square, SquarePen, FilePen, FileText, FolderPlus, Search, Trash2, MoveRight, List, ChevronDown, Check, Folder, ClipboardPaste, X } from '@lucide/svelte'
-  import { app, call, pulse, reveal, title, flat, type Node } from './store.svelte'
+  import { app, call, pulse, reveal, title, flat, backend, type Node } from './store.svelte'
+  import { t as tr } from './i18n.svelte'
 
-  type Agent = 'claude' | 'codex'
+  type Agent = string // 'claude' | 'codex' | 'custom:<provider id>'
   type Model = { id: string; name: string; default: boolean; light: boolean }
   // attached to the next message: a mentioned file/folder, or a long paste kept out of the textarea
   type Att = { kind: 'file' | 'dir'; path: string } | { kind: 'text'; text: string }
   type Line = { role: 'user' | 'ai' | 'action' | 'error'; text: string; open?: boolean; path?: string | null; tool?: string; atts?: Att[] }
 
   const ls = (k: string) => { try { return localStorage.getItem(k) } catch { return null } }
-  let agent = $state<Agent>(ls('agent') === 'codex' ? 'codex' : 'claude')
-  // chosen model per CLI, with its name so the picker reads right before the lists arrive
-  let chosen = $state<Record<Agent, { id: string; name: string } | null>>(JSON.parse(ls('models') ?? '{"claude":null,"codex":null}'))
-  let models = $state<Record<Agent, Model[] | string | null>>({ claude: null, codex: null }) // string = error
-  let found = $state<Record<Agent, boolean>>({ claude: true, codex: true }) // until the backend says otherwise
-  const none = $derived(!found.claude && !found.codex)
+  let agent = $state<Agent>(ls('agent') ?? 'claude')
+  // chosen model per agent, with its name so the picker reads right before the lists arrive
+  let chosen = $state<Record<Agent, { id: string; name: string } | null>>(JSON.parse(ls('models') ?? '{}'))
+  let models = $state<Record<Agent, Model[] | string | null>>({}) // string = error
+  // CLIs: installed? custom providers: answering? (true until known otherwise)
+  let found = $state<Record<Agent, boolean>>({ claude: true, codex: true })
+  const agents = $derived(['claude', 'codex', ...backend.settings.providers.map((p) => `custom:${p.id}`)])
+  const usable = (a: Agent) => agents.includes(a) && found[a] !== false
+  const none = $derived(!agents.some(usable))
   let atts = $state<Att[]>([])
   let mention = $state<{ start: number; q: string } | null>(null)
   let hi = $state(0)
@@ -32,8 +36,9 @@
   let list: HTMLDivElement
   let box: HTMLTextAreaElement
 
-  const label = $derived(agent === 'codex' ? 'Codex' : 'Claude')
-  const names: Record<Agent, string> = { claude: 'Claude', codex: 'Codex' }
+  const nameOf = (a: Agent) =>
+    a === 'claude' ? 'Claude' : a === 'codex' ? 'Codex' : (backend.settings.providers.find((p) => `custom:${p.id}` === a)?.name ?? a)
+  const label = $derived(nameOf(agent))
   // the user's pick, else a light model (cheap and quick for note chores), else the CLI's own default
   const current = (a: Agent) => {
     const m = models[a]
@@ -41,10 +46,24 @@
   }
 
   function loadModels(a: Agent) {
-    if (!found[a] || Array.isArray(models[a])) return
+    const custom = a.startsWith('custom:')
+    if ((!custom && !found[a]) || Array.isArray(models[a])) return
     models[a] = null
-    invoke<Model[]>('agent_models', { agent: a }).then((m) => (models[a] = m), (e) => (models[a] = String(e)))
+    invoke<Model[]>('agent_models', { agent: a }).then(
+      (m) => { models[a] = m; found[a] = true },
+      (e) => { models[a] = String(e); if (custom) found[a] = false },
+    )
   }
+
+  // custom providers come and go (Settings) and may be down: ask them again when the agent menu opens
+  const probe = () => agents.filter((a) => a.startsWith('custom:') && !Array.isArray(models[a])).forEach(loadModels)
+  $effect(() => {
+    backend.settings.providers // a provider added or edited: forget what we knew about it
+    untrack(() => {
+      for (const a of Object.keys(models)) if (a.startsWith('custom:')) delete models[a]
+      probe()
+    })
+  })
 
   function choose(m: Model) {
     chosen[agent] = { id: m.id, name: m.name }
@@ -85,7 +104,7 @@
   }
 
   const lineCount = (t: string) => t.split('\n').length
-  const attName = (a: Att) => (a.kind === 'text' ? `Texte collé · ${lineCount(a.text)} lignes` : a.kind === 'dir' ? a.path + '/' : title(a.path))
+  const attName = (a: Att) => (a.kind === 'text' ? tr('Texte collé · {n} lignes', { n: lineCount(a.text) }) : a.kind === 'dir' ? a.path + '/' : title(a.path))
 
   function context(list: Att[]) {
     let ctx = ''
@@ -147,7 +166,7 @@
   }
 
   function pick(a: Agent) {
-    if (running || a === agent || !found[a]) return
+    if (running || a === agent || !usable(a)) return
     agent = a
     try { localStorage.setItem('agent', a) } catch {}
     loadModels(a)
@@ -156,9 +175,12 @@
 
   onMount(() => {
     invoke<Record<Agent, boolean>>('agent_available').then((f) => {
-      found = f
-      const other: Agent = agent === 'claude' ? 'codex' : 'claude'
-      if (!f[agent] && f[other]) pick(other)
+      found = { ...found, ...f }
+      // the saved agent is gone (uninstalled, provider removed): take the first that works
+      if (!usable(agent)) {
+        const next = agents.find((a) => usable(a) && !a.startsWith('custom:'))
+        if (next) pick(next)
+      }
       loadModels(agent) // the light default needs the list to be named
     })
     const a = listen<any>('agent://event', ({ payload: e }) => {
@@ -180,7 +202,7 @@
     })
     const m = listen<{ tool: string; path: string | null }>('mcp://call', ({ payload }) => {
       close()
-      lines.push({ role: 'action', text: verbs[payload.tool] ?? payload.tool, path: payload.path, tool: payload.tool })
+      lines.push({ role: 'action', text: verbs[payload.tool] ? tr(verbs[payload.tool]) : payload.tool, path: payload.path, tool: payload.tool })
       if (payload.path && !['read_note', 'list_notes', 'search_notes'].includes(payload.tool)) {
         setTimeout(() => { reveal(payload.path!); pulse(payload.path!) }, 180) // after the tree refresh
       }
@@ -217,18 +239,19 @@
 
 <aside class="agent">
   <header>
-    <Tip class="icon-btn" label="Nouvelle conversation" disabled={running} onclick={reset}><SquarePen size={15} strokeWidth={1.5} /></Tip>
+    <Tip class="icon-btn" label={tr('Nouvelle conversation')} disabled={running} onclick={reset}><SquarePen size={15} strokeWidth={1.5} /></Tip>
   </header>
 
   <div class="lines" bind:this={list}>
     {#if !lines.length}
       <div class="intro">
         {#if none}
-          <p>Aucun agent trouvé. Installe <strong>Claude Code</strong> (<code>claude</code>) ou <strong>Codex</strong> (<code>codex</code>), puis rouvre traym.</p>
+          <p>{tr('Aucun agent trouvé. Installe Claude Code (claude) ou Codex (codex), ou ajoute une IA dans les réglages.')}</p>
+          <button onclick={() => (app.settings = true)}>{tr('Réglages')}</button>
         {:else}
-          <p>{label} lit, écrit et range vos notes directement dans ce vault.</p>
+          <p>{tr('{agent} lit, écrit et range vos notes directement dans ce vault.', { agent: label })}</p>
           {#each examples as ex}
-            <button onclick={() => send(ex)}>{ex}</button>
+            <button onclick={() => send(tr(ex))}>{tr(ex)}</button>
           {/each}
         {/if}
       </div>
@@ -263,13 +286,13 @@
     {/each}
 
     {#if running && !(last()?.role === 'ai' && last()?.open)}
-      <div class="dots" aria-label="{label} réfléchit"><i></i><i></i><i></i></div>
+      <div class="dots" aria-label={tr('{agent} réfléchit', { agent: label })}><i></i><i></i><i></i></div>
     {/if}
   </div>
 
   <form class="composer" onsubmit={(e) => { e.preventDefault(); send() }}>
     {#if hits.length}
-      <div class="mentions" id="mentions" role="listbox" aria-label="Notes et dossiers">
+      <div class="mentions" id="mentions" role="listbox" aria-label={tr('Notes et dossiers')}>
         {#each hits as n, i (n.path)}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div
@@ -291,13 +314,13 @@
     {#if atts.length || app.current}
       <div class="chips">
         {#if app.current}
-          <span class="chip ctx" title="Note ouverte, jointe automatiquement"><FileText size={12} strokeWidth={1.75} />{title(app.current)}</span>
+          <span class="chip ctx" title={tr('Note ouverte, jointe automatiquement')}><FileText size={12} strokeWidth={1.75} />{title(app.current)}</span>
         {/if}
         {#each atts as a, i}
           {@const Icon = a.kind === 'text' ? ClipboardPaste : a.kind === 'dir' ? Folder : FileText}
           <span class="chip" title={a.kind === 'text' ? a.text.slice(0, 300) : a.path}>
             <Icon size={12} strokeWidth={1.75} />{attName(a)}
-            <button type="button" aria-label="Retirer {attName(a)}" onclick={() => { atts.splice(i, 1); box.focus() }}><X size={11} strokeWidth={2} /></button>
+            <button type="button" aria-label={tr('Retirer {name}', { name: attName(a) })} onclick={() => { atts.splice(i, 1); box.focus() }}><X size={11} strokeWidth={2} /></button>
           </span>
         {/each}
       </div>
@@ -306,7 +329,7 @@
       bind:this={box}
       bind:value={input}
       rows="1"
-      placeholder={none ? 'Installe Claude Code ou Codex pour discuter' : `Demander à ${label} — @ pour joindre une note`}
+      placeholder={none ? tr('Installe Claude Code ou Codex pour discuter') : tr('Demander à {agent} — @ pour joindre une note', { agent: label })}
       disabled={none}
       role="combobox"
       aria-expanded={hits.length > 0}
@@ -321,16 +344,18 @@
     ></textarea>
     <div class="bar">
       <div class="pickers">
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger class="picker agent-pick" disabled={running || none} aria-label="Agent : {names[agent]}">
-            {names[agent]}<ChevronDown size={12} strokeWidth={1.75} />
+        <DropdownMenu.Root onOpenChange={(o) => o && probe()}>
+          <DropdownMenu.Trigger class="picker agent-pick" disabled={running || none} aria-label={tr('Agent : {name}', { name: label })}>
+            {label}<ChevronDown size={12} strokeWidth={1.75} />
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content class="menu" side="top" align="start" sideOffset={6} collisionPadding={8} onCloseAutoFocus={(e) => { e.preventDefault(); box.focus() }}>
-              {#each ['claude', 'codex'] as const as a}
-                <DropdownMenu.Item disabled={!found[a]} onSelect={() => pick(a)}>
-                  <Check size={13} strokeWidth={2} style="visibility: {agent === a ? 'visible' : 'hidden'}" />{names[a]}
-                  {#if !found[a]}<small class="missing">introuvable</small>{/if}
+              {#each agents as a, i (a)}
+                {#if i === 2}<DropdownMenu.Separator />{/if}
+                {@const why = typeof models[a] === 'string' ? (models[a] as string) : undefined}
+                <DropdownMenu.Item disabled={!usable(a)} onSelect={() => pick(a)} title={found[a] === false ? why : undefined}>
+                  <Check size={13} strokeWidth={2} style="visibility: {agent === a ? 'visible' : 'hidden'}" />{nameOf(a)}
+                  {#if found[a] === false}<small class="missing">{tr(a.startsWith('custom:') ? 'injoignable' : 'introuvable')}</small>{/if}
                 </DropdownMenu.Item>
               {/each}
             </DropdownMenu.Content>
@@ -338,8 +363,8 @@
         </DropdownMenu.Root>
         {#if !none}
           <DropdownMenu.Root onOpenChange={(o) => o && loadModels(agent)}>
-            <DropdownMenu.Trigger class="picker" disabled={running} aria-label="Modèle : {current(agent)?.name ?? 'par défaut'}">
-              <span>{current(agent)?.name ?? (typeof models[agent] === 'string' ? 'Modèle par défaut' : 'Modèle…')}</span><ChevronDown size={12} strokeWidth={1.75} />
+            <DropdownMenu.Trigger class="picker" disabled={running} aria-label={tr('Modèle : {name}', { name: current(agent)?.name ?? tr('par défaut') })}>
+              <span>{current(agent)?.name ?? tr(typeof models[agent] === 'string' ? 'Modèle par défaut' : 'Modèle…')}</span><ChevronDown size={12} strokeWidth={1.75} />
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content class="menu" side="top" align="start" sideOffset={6} collisionPadding={8} onCloseAutoFocus={(e) => { e.preventDefault(); box.focus() }}>
@@ -351,7 +376,7 @@
                     </DropdownMenu.Item>
                   {/each}
                 {:else}
-                  <div class="note">{list ?? 'Chargement des modèles…'}</div>
+                  <div class="note">{list ?? tr('Chargement des modèles…')}</div>
                 {/if}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -359,9 +384,9 @@
         {/if}
       </div>
       {#if running}
-        <button type="button" class="send stop" title="Arrêter" onclick={() => call('agent_stop')}><Square size={11} fill="currentColor" strokeWidth={0} /></button>
+        <button type="button" class="send stop" title={tr('Arrêter')} onclick={() => call('agent_stop')}><Square size={11} fill="currentColor" strokeWidth={0} /></button>
       {:else}
-        <button type="submit" class="send" title="Envoyer" disabled={none || (!input.trim() && !atts.length)}><ArrowUp size={15} strokeWidth={2} /></button>
+        <button type="submit" class="send" title={tr('Envoyer')} disabled={none || (!input.trim() && !atts.length)}><ArrowUp size={15} strokeWidth={2} /></button>
       {/if}
     </div>
   </form>
@@ -393,8 +418,7 @@
   }
 
   .intro { margin-top: 8px; display: grid; gap: 6px; justify-items: start; }
-  .intro p { margin: 0 0 8px; color: var(--muted); font: 14px/1.55 var(--text); }
-  .intro code { font: 0.86em var(--mono); }
+  .intro p { margin: 0 0 8px; color: var(--muted); font: var(--chat-size)/1.55 var(--text); }
   .intro button {
     text-align: left;
     padding: 6px 10px;
@@ -412,11 +436,11 @@
     background: var(--surface);
     border: 1px solid var(--line-soft);
     border-radius: 8px;
-    font: 14px/1.5 var(--text);
+    font: var(--chat-size)/1.5 var(--text);
     white-space: pre-wrap;
     animation: rise var(--t) var(--ease);
   }
-  .ai { font: 14px/1.62 var(--text); color: var(--fg); overflow-wrap: anywhere; }
+  .ai { font: var(--chat-size)/1.62 var(--text); color: var(--fg); overflow-wrap: anywhere; }
   .ai :global(p) { margin: 0 0 0.6em; }
   .ai :global(p:last-child) { margin-bottom: 0; }
   .ai :global(ul), .ai :global(ol) { margin: 0.3em 0 0.6em; padding-left: 1.3em; }
@@ -487,7 +511,7 @@
     resize: none;
     border: 0;
     background: none;
-    font: 14px/1.5 var(--text);
+    font: var(--chat-size)/1.5 var(--text);
     max-height: 200px;
   }
   textarea::placeholder { color: var(--faint); }

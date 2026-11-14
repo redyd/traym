@@ -5,14 +5,16 @@
   import { documentDir, join } from '@tauri-apps/api/path'
   import { Tooltip } from 'bits-ui'
   import { Toaster } from 'svelte-sonner'
-  import { PanelLeft, Sparkles, Sun, Moon, Minus, Square, X } from '@lucide/svelte'
+  import { PanelLeft, Sparkles, Sun, Moon, Minus, Square, X, Settings } from '@lucide/svelte'
   import Tip from './lib/Tip.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import Editor from './lib/Editor.svelte'
   import AgentPanel from './lib/AgentPanel.svelte'
   import Palette from './lib/Palette.svelte'
   import Conflicts from './lib/Conflicts.svelte'
-  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit } from './lib/store.svelte'
+  import SettingsPage from './lib/Settings.svelte'
+  import { t, lang } from './lib/i18n.svelte'
+  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, loadSettings } from './lib/store.svelte'
 
   const win = getCurrentWindow()
   let dark = $state(true)
@@ -42,22 +44,26 @@
   }
 
   async function chooseVault() {
-    const dir = await open({ directory: true, title: 'Choisir le dossier de notes' })
+    const dir = await open({ directory: true, title: t('Choisir le dossier de notes') })
     if (typeof dir === 'string') await openVault(dir)
   }
 
-  const commands = [
-    { label: 'Nouvelle note', keys: [mod, 'N'], run: () => newNote() },
-    { label: 'Nouveau dossier', run: () => newFolder(app.current ? parent(app.current) : '') },
-    { label: 'Ouvrir une note', keys: [mod, 'P'], run: () => setTimeout(() => (app.palette = 'files')) },
-    { label: 'Afficher ou masquer la barre latérale', keys: [mod, '\\'], run: toggleSidebar },
-    { label: "Afficher ou masquer l'agent", keys: [mod, 'J'], run: toggleAgent },
-    { label: 'Changer de thème', keys: [mod, 'Maj', 'L'], run: toggleTheme },
-    { label: 'Suivre le thème du système', run: () => { app.theme = 'system'; applyTheme(); persist() } },
-    { label: 'Changer de dossier de notes', run: chooseVault },
-  ]
+  const toggleSettings = () => (app.settings = !app.settings)
+  const commands = $derived([
+    { label: t('Nouvelle note'), keys: [mod, 'N'], run: () => newNote() },
+    { label: t('Nouveau dossier'), run: () => newFolder(app.current ? parent(app.current) : '') },
+    { label: t('Ouvrir une note'), keys: [mod, 'P'], run: () => setTimeout(() => (app.palette = 'files')) },
+    { label: t('Afficher ou masquer la barre latérale'), keys: [mod, '\\'], run: toggleSidebar },
+    { label: t("Afficher ou masquer l'agent"), keys: [mod, 'J'], run: toggleAgent },
+    { label: t('Changer de thème'), keys: [mod, t('Maj'), 'L'], run: toggleTheme },
+    { label: t('Suivre le thème du système'), run: () => { app.theme = 'system'; applyTheme(); persist() } },
+    { label: t('Changer de dossier de notes'), run: chooseVault },
+    { label: t('Réglages'), keys: [mod, ','], run: () => (app.settings = true) },
+  ])
 
   function keys(e: KeyboardEvent) {
+    if (e.key === 'Escape' && app.settings && !app.palette) return void (app.settings = false)
+    if ((e.ctrlKey || e.metaKey) && e.key === ',') return void (e.preventDefault(), toggleSettings())
     if (!(e.ctrlKey || e.metaKey) || e.altKey || !app.vault || locked) return
     const k = e.key.toLowerCase()
     const map: Record<string, () => void> = {
@@ -82,13 +88,23 @@
       e.preventDefault()
       quit()
     })
-    applyTheme()
+    loadSettings().catch(() => {})
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme)
     // first launch: no picker, straight into ~/Documents/traym
     ;(async () => app.vault ?? join(await documentDir(), 'traym'))()
       .then(openVault)
       .catch(() => (app.vault = null))
       .finally(() => (ready = true))
+  })
+
+  // density and language apply to the whole document (CSS variables, lang attribute)
+  $effect(() => {
+    app.theme // set from Settings too
+    applyTheme()
+  })
+  $effect(() => {
+    document.documentElement.dataset.density = app.density
+    document.documentElement.lang = lang()
   })
 
   const crumbs = $derived(app.current ? [...parent(app.current).split('/').filter(Boolean), title(app.current)] : [])
@@ -100,9 +116,9 @@
 <div class="shell">
   <header class="titlebar" data-tauri-drag-region>
     <div class="left" data-tauri-drag-region>
-      <Tip class="mark" label="Ouvrir un autre dossier" onclick={chooseVault}><i></i>traym</Tip>
+      <Tip class="mark" label={t('Ouvrir un autre dossier')} onclick={chooseVault}><i></i>traym</Tip>
       {#if app.vault && !locked}
-        <Tip class="icon-btn" aria-pressed={app.sidebar} label="Barre latérale ({mod}+\)" onclick={toggleSidebar}>
+        <Tip class="icon-btn" aria-pressed={app.sidebar} label={t('Barre latérale ({mod}+\\)', { mod })} onclick={toggleSidebar}>
           <PanelLeft size={15} strokeWidth={1.5} />
         </Tip>
       {/if}
@@ -116,18 +132,21 @@
     </div>
 
     <div class="right" data-tauri-drag-region>
-      <Tip class="icon-btn" label={dark ? `Thème clair (${mod}+Maj+L)` : `Thème sombre (${mod}+Maj+L)`} onclick={toggleTheme}>
+      <Tip class="icon-btn" aria-pressed={app.settings} label={t('Réglages ({mod}+,)', { mod })} onclick={toggleSettings}>
+        <Settings size={15} strokeWidth={1.5} />
+      </Tip>
+      <Tip class="icon-btn" label={t(dark ? 'Thème clair ({mod}+Maj+L)' : 'Thème sombre ({mod}+Maj+L)', { mod })} onclick={toggleTheme}>
         {#if dark}<Sun size={15} strokeWidth={1.5} />{:else}<Moon size={15} strokeWidth={1.5} />{/if}
       </Tip>
       {#if app.vault && !locked}
-        <Tip class="icon-btn" aria-pressed={app.agent} label="Agent ({mod}+J)" onclick={toggleAgent}>
+        <Tip class="icon-btn" aria-pressed={app.agent} label={t('Agent ({mod}+J)', { mod })} onclick={toggleAgent}>
           <Sparkles size={15} strokeWidth={1.5} />
         </Tip>
       {/if}
       <span class="divider"></span>
-      <Tip class="icon-btn win" label="Réduire" onclick={() => win.minimize()}><Minus size={14} strokeWidth={1.5} /></Tip>
-      <Tip class="icon-btn win" label="Agrandir" onclick={() => win.toggleMaximize()}><Square size={11} strokeWidth={1.6} /></Tip>
-      <Tip class="icon-btn win close" label="Fermer" onclick={() => win.close()}><X size={15} strokeWidth={1.5} /></Tip>
+      <Tip class="icon-btn win" label={t('Réduire')} onclick={() => win.minimize()}><Minus size={14} strokeWidth={1.5} /></Tip>
+      <Tip class="icon-btn win" label={t('Agrandir')} onclick={() => win.toggleMaximize()}><Square size={11} strokeWidth={1.6} /></Tip>
+      <Tip class="icon-btn win close" label={t('Fermer')} onclick={() => win.close()}><X size={15} strokeWidth={1.5} /></Tip>
     </div>
   </header>
 
@@ -138,6 +157,7 @@
   {:else if app.vault}
     <main
       class="body grid"
+      inert={app.settings}
       class:anim
       style:grid-template-columns="{app.sidebar ? app.sidebarW : 0}px minmax(0, 1fr) {app.agent ? AGENT_W : 0}px"
     >
@@ -152,10 +172,13 @@
   {:else}
     <main class="body welcome">
       <h1><i></i>traym</h1>
-      <p>Vos notes en markdown, dans un dossier de votre disque. Claude et Codex peuvent les lire et les ranger avec vous.</p>
-      <button onclick={chooseVault}>Choisir un dossier de notes</button>
+      <p>{t('Vos notes en markdown, dans un dossier de votre disque. Claude et Codex peuvent les lire et les ranger avec vous.')}</p>
+      <button onclick={chooseVault}>{t('Choisir un dossier de notes')}</button>
     </main>
   {/if}
+
+  <!-- over the main view, which stays mounted: the chat and the open note survive a trip to Settings -->
+  {#if app.settings}<SettingsPage onclose={() => (app.settings = false)} />{/if}
 
   {#if app.palette && !locked}<Palette {commands} />{/if}
 
@@ -164,13 +187,13 @@
       <div class="card">
         {#if app.closing === 'sync'}
           <span class="spinner" aria-hidden="true"></span>
-          <p id="closing-title">Synchronisation…</p>
+          <p id="closing-title">{t('Synchronisation…')}</p>
         {:else}
-          <p id="closing-title">La synchronisation a échoué</p>
+          <p id="closing-title">{t('La synchronisation a échoué')}</p>
           <pre>{app.closing.error}</pre>
           <div class="actions">
-            <button onclick={() => (app.closing = null)}>Annuler</button>
-            <button class="primary" onclick={() => win.destroy()}>Quitter quand même</button>
+            <button onclick={() => (app.closing = null)}>{t('Annuler')}</button>
+            <button class="primary" onclick={() => win.destroy()}>{t('Quitter quand même')}</button>
           </div>
         {/if}
       </div>

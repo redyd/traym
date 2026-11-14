@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   import { ChevronRight, Folder, FolderOpen } from '@lucide/svelte'
   import Tree from './Tree.svelte'
   import { app, move, join, parent, title, exists, flash, persist, type Node } from './store.svelte'
@@ -22,7 +23,7 @@
     if (!name) return
     const to = join(parent(n.path), n.dir ? name : name + '.md')
     if (to === n.path) return
-    if (exists(to)) return flash(`« ${name} » existe déjà ici`)
+    if (exists(to)) return flash(t('« {name} » existe déjà ici', { name }))
     await move(n.path, to)
   }
 
@@ -35,7 +36,7 @@
     const dir = n.dir ? n.path : parent(n.path)
     const to = join(dir, from.split('/').pop()!)
     if (to !== from && !(dir + '/').startsWith(from + '/')) {
-      if (exists(to)) return flash('Un élément porte déjà ce nom ici')
+      if (exists(to)) return flash(t('Un élément porte déjà ce nom ici'))
       app.open.add(dir)
       move(from, to)
     }

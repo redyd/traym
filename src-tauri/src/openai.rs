@@ -4,7 +4,8 @@
 
 use crate::{agent::BRIEF, mcp, settings::Provider, Core};
 use serde_json::{json, Value};
-use std::sync::{Arc, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::Emitter;
 
@@ -138,27 +139,40 @@ pub async fn send(core: Arc<Core>, id: String, prompt: String, session: Option<S
         h.push(json!({ "role": "user", "content": prompt }));
     }
     // a task, so "stop" can abort it mid-stream; the history keeps every completed step
-    let work = tokio::spawn(run(core.clone(), p, model, sid));
+    let c = core.clone();
+    let work = tokio::spawn(async move {
+        let emit = |v: Value| {
+            let _ = c.app.emit("agent://event", v);
+        };
+        run(&c.chats, &sid, &p, &model, emit, |name, args| mcp::run_tool(&c, name, args)).await
+    });
     *core.task.lock().unwrap() = Some(work.abort_handle());
     let r = work.await;
     core.task.lock().unwrap().take();
     r.unwrap_or(Ok(())) // Err = aborted by the user
 }
 
-async fn run(core: Arc<Core>, p: Provider, model: String, sid: String) -> Result<(), String> {
-    let emit = |v: Value| {
-        let _ = core.app.emit("agent://event", v);
-    };
+type Chats = Mutex<HashMap<String, Vec<Value>>>;
+
+/// The agent loop: stream a completion, run the tools it asks for, repeat until it just answers.
+async fn run(
+    chats: &Chats,
+    sid: &str,
+    p: &Provider,
+    model: &str,
+    emit: impl Fn(Value),
+    tool: impl Fn(&str, &Value) -> Result<String, String>,
+) -> Result<(), String> {
     let tools = functions();
     for _ in 0..MAX_STEPS {
-        let messages = core.chats.lock().unwrap().get(&sid).cloned().unwrap_or_default();
+        let messages = chats.lock().unwrap().get(sid).cloned().unwrap_or_default();
         let body = json!({ "model": model, "messages": messages, "tools": tools, "stream": true });
-        let mut r = req(&p, true, "chat/completions").json(&body).send().await.map_err(net(&p))?;
+        let mut r = req(p, true, "chat/completions").json(&body).send().await.map_err(net(p))?;
         if !r.status().is_success() {
             return Err(failure(r).await);
         }
         let mut turn = Turn::default();
-        while let Some(chunk) = r.chunk().await.map_err(net(&p))? {
+        while let Some(chunk) = r.chunk().await.map_err(net(p))? {
             for d in turn.feed(&chunk) {
                 emit(json!({ "type": "delta", "text": d }));
             }
@@ -175,11 +189,11 @@ async fn run(core: Arc<Core>, p: Provider, model: String, sid: String) -> Result
         for (i, (id, name, args)) in turn.calls.iter().enumerate() {
             emit(json!({ "type": "tool", "name": name }));
             let a: Value = serde_json::from_str(args).unwrap_or(json!({}));
-            let out = mcp::run_tool(&core, name, &a).unwrap_or_else(|e| format!("error: {e}"));
+            let out = tool(name, &a).unwrap_or_else(|e| format!("error: {e}"));
             let id = if id.is_empty() { format!("call_{i}") } else { id.clone() };
             step.push(json!({ "role": "tool", "tool_call_id": id, "content": out }));
         }
-        core.chats.lock().unwrap().entry(sid.clone()).or_default().extend(step);
+        chats.lock().unwrap().entry(sid.to_string()).or_default().extend(step);
         if done {
             return Ok(());
         }
@@ -218,6 +232,62 @@ mod tests {
         let mut e = Turn::default();
         e.feed(b"data: {\"error\":{\"message\":\"model not found\"}}\n");
         assert_eq!(e.error.as_deref(), Some("model not found"));
+    }
+
+    /// A fake OpenAI server: the first completion asks for a tool, the second answers with text.
+    #[tokio::test]
+    async fn agent_loop_runs_tools_until_an_answer() {
+        use axum::{routing::post, Json, Router};
+        let calls = Arc::new(Mutex::new(vec![]));
+        let seen = calls.clone();
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move |Json(body): Json<Value>| {
+                let seen = seen.clone();
+                async move {
+                    let n = body["messages"].as_array().unwrap().len();
+                    seen.lock().unwrap().push(body);
+                    let sse = if n == 2 {
+                        concat!(
+                            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"create_note\",\"arguments\":\"\"}}]}}]}\n\n",
+                            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\\\"Courses\\\"}\"}}]}}]}\n\n",
+                            "data: [DONE]\n\n"
+                        )
+                    } else {
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"C'est \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"fait.\"}}]}\n\ndata: [DONE]\n\n"
+                    };
+                    ([("content-type", "text/event-stream")], sse)
+                }
+            }),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", l.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+
+        let p = Provider { id: "t".into(), name: "Test".into(), base_url: url, api_key: "sk-x".into() };
+        let chats: Chats = Mutex::new(HashMap::from([("s".to_string(), vec![json!({"role":"system","content":"x"}), json!({"role":"user","content":"crée Courses"})])]));
+        let events = Mutex::new(vec![]);
+        let tools_run = Mutex::new(vec![]);
+        run(&chats, "s", &p, "m", |v| events.lock().unwrap().push(v), |name, a| {
+            tools_run.lock().unwrap().push((name.to_string(), a.clone()));
+            Ok("ok".into())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(*tools_run.lock().unwrap(), vec![("create_note".to_string(), json!({"path":"Courses"}))]);
+        let ev = events.lock().unwrap();
+        assert!(ev.contains(&json!({"type":"delta","text":"C'est "})) && ev.contains(&json!({"type":"message","text":"C'est fait."})));
+        let h = &chats.lock().unwrap()["s"];
+        let roles: Vec<&str> = h.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, ["system", "user", "assistant", "tool", "assistant"]);
+        assert_eq!(h[3]["tool_call_id"], "c1");
+        // the second request carried the tool result, the tools and the model
+        let reqs = calls.lock().unwrap();
+        assert_eq!(reqs.len(), 2);
+        assert_eq!(reqs[1]["messages"][3]["content"], "ok");
+        assert_eq!((reqs[0]["model"].as_str(), reqs[0]["stream"].as_bool()), (Some("m"), Some(true)));
+        assert!(reqs[0]["tools"].as_array().unwrap().iter().any(|t| t["function"]["name"] == "edit_note"));
     }
 
     #[test]

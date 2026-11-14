@@ -24,6 +24,12 @@
   --mono: 'Red Hat Mono Variable', ui-monospace, monospace;
 
   --r: 6px;
+  /* density (Settings): normal by default */
+  --ui-size: 13px;
+  --doc-size: 16.5px;
+  --doc-line: 1.72;
+  --page-w: 700px;
+  --chat-size: 14px;
   --t-fast: 140ms;
   --t: 200ms;
   color-scheme: dark;
@@ -47,6 +53,9 @@
   color-scheme: light;
 }
 
+:root[data-density='compact'] { --ui-size: 12.5px; --doc-size: 15px; --doc-line: 1.6; --page-w: 760px; --chat-size: 13px; }
+:root[data-density='large'] { --ui-size: 14px; --doc-size: 18px; --doc-line: 1.8; --page-w: 820px; --chat-size: 15px; }
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -55,7 +64,7 @@ html, body {
   overflow: hidden;
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.45 var(--display);
+  font: var(--ui-size)/1.45 var(--display);
   font-feature-settings: 'tnum' 0;
   -webkit-font-smoothing: antialiased;
   user-select: none;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte'
   import { app, flat, title, parent, persist } from './store.svelte'
 
   type Item = { label: string; hint?: string; keys?: string[]; run: () => void }
@@ -70,7 +71,7 @@
       bind:value={q}
       onkeydown={key}
       spellcheck="false"
-      placeholder={app.palette === 'files' ? 'Rechercher une note' : 'Rechercher une commande'}
+      placeholder={t(app.palette === 'files' ? 'Rechercher une note' : 'Rechercher une commande')}
     />
     <div class="list" bind:this={listEl} role="listbox">
       {#each shown as it, i}
@@ -80,7 +81,7 @@
           {#if it.keys}<span class="keys">{#each it.keys as k}<kbd>{k}</kbd>{/each}</span>{/if}
         </button>
       {:else}
-        <p class="none">{app.palette === 'files' ? 'Aucune note ne correspond' : 'Aucune commande ne correspond'}</p>
+        <p class="none">{t(app.palette === 'files' ? 'Aucune note ne correspond' : 'Aucune commande ne correspond')}</p>
       {/each}
     </div>
   </div>
