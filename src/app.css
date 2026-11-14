@@ -154,6 +154,11 @@ input, textarea {
 .menu [role='menuitem'].danger[data-highlighted],
 .menu [role='menuitem'].danger[data-highlighted] svg { color: var(--orange); }
 .menu [role='separator'] { height: 1px; background: var(--line-soft); margin: 4px 2px; }
+.menu [role='menuitem'][data-state='open'] { background: var(--orange-wash); }
+.menu [role='menuitem'].on svg { color: var(--orange); }
+.menu kbd { all: unset; margin-left: auto; padding-left: 20px; font: 11.5px var(--display); color: var(--faint); }
+.menu svg.sub { margin-left: auto; color: var(--faint); }
+.menu:focus-visible, .menu [role='menuitem']:focus-visible { outline: none; }
 @keyframes layer-in { from { opacity: 0; } }
 
 [data-sonner-toaster] {

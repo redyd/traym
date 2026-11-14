@@ -4,12 +4,12 @@
   import { Markdown } from '@tiptap/markdown'
   import { BubbleMenu } from '@tiptap/extension-bubble-menu'
   import { FileHandler } from '@tiptap/extension-file-handler'
-  import { DropdownMenu } from 'bits-ui'
+  import { DropdownMenu, ContextMenu } from 'bits-ui'
   import { convertFileSrc } from '@tauri-apps/api/core'
   import { open } from '@tauri-apps/plugin-dialog'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
-    Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus,
+    Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus, Scissors, Copy, ClipboardPaste, TextSelect, Pilcrow, ChevronRight,
   } from '@lucide/svelte'
   import TableIcon, { type TableOp } from './TableIcon.svelte'
   import { extensions, split, media } from './schema'
@@ -155,6 +155,35 @@
   ]
   // only while the caret is in a table: the same actions, reachable from the keyboard (the grips are mouse-only)
   const tableTools: Item[] = [...rowMenu, ...colMenu, { label: 'Supprimer le tableau', icon: Grid2x2X, run: (c) => c.deleteTable(), danger: true }]
+  // right-click menu: what the toolbar offers, plus the clipboard, scoped to where the click landed
+  let picked = $state(false) // a non-empty selection
+  const tool = (k: string) => tools.find((t) => t?.key === k)!
+  const blocks = ['h1', 'h2', 'h3', 'list', 'task', 'quote', 'codeBlock'].map(tool)
+
+  function aim(e: MouseEvent) {
+    const v = editor?.view
+    if (!v) return
+    // right-clicking outside the selection moves the caret there, so "the row" means the row under the mouse
+    const at = v.posAtCoords({ left: e.clientX, top: e.clientY })?.pos
+    const { from, to, empty } = v.state.selection
+    if (at != null && (empty || at < from || at > to)) editor!.chain().focus().setTextSelection(at).run()
+    else editor!.commands.focus()
+    picked = !editor!.state.selection.empty
+  }
+
+  function clip(action: 'cut' | 'copy') {
+    editor!.view.focus()
+    document.execCommand(action) // goes through ProseMirror's own copy/cut handlers (markdown-safe)
+  }
+  async function pasteClip() {
+    editor!.view.focus()
+    try {
+      editor!.view.pasteText(await navigator.clipboard.readText())
+    } catch {
+      flash(`Collage impossible depuis le menu ici : utilise ${mod}+V`)
+    }
+  }
+
   function openMenu(k: 'row' | 'col', o: boolean) {
     menu = o ? k : null
     if (!o) leave()
@@ -284,6 +313,7 @@
           return true
         },
       },
+      onSelectionUpdate: ({ editor: e }) => (picked = !e.state.selection.empty),
       onTransaction: () => {
         const a = tools.filter((t) => t?.active()).map((t) => t!.key)
         if (a.join() !== on.join()) on = a
@@ -453,7 +483,50 @@
         onchange={(e) => rename(e.currentTarget)}
       />
     {/if}
-    <div bind:this={host}></div>
+    <ContextMenu.Root>
+      <ContextMenu.Trigger>
+        {#snippet child({ props })}<div {...props} bind:this={host} oncontextmenucapture={aim}></div>{/snippet}
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content class="menu" collisionPadding={8} onCloseAutoFocus={(e) => { e.preventDefault(); editor?.commands.focus() }}>
+          <ContextMenu.Item disabled={!picked} onSelect={() => clip('cut')}><Scissors size={14} strokeWidth={1.6} />Couper<kbd>{mod}+X</kbd></ContextMenu.Item>
+          <ContextMenu.Item disabled={!picked} onSelect={() => clip('copy')}><Copy size={14} strokeWidth={1.6} />Copier<kbd>{mod}+C</kbd></ContextMenu.Item>
+          <ContextMenu.Item onSelect={pasteClip}><ClipboardPaste size={14} strokeWidth={1.6} />Coller<kbd>{mod}+V</kbd></ContextMenu.Item>
+          {#if picked}
+            <ContextMenu.Separator />
+            {#each ['bold', 'italic', 'strike', 'code'].map(tool) as t}
+              <ContextMenu.Item class={on.includes(t.key) ? 'on' : ''} onSelect={() => t.run()}><t.icon size={14} strokeWidth={1.6} />{t.label.replace(/ \(.*/, '')}<kbd>{t.label.match(/\((.*)\)/)?.[1]}</kbd></ContextMenu.Item>
+            {/each}
+          {/if}
+          <ContextMenu.Separator />
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger><Pilcrow size={14} strokeWidth={1.6} />Transformer en<ChevronRight class="sub" size={13} /></ContextMenu.SubTrigger>
+            <ContextMenu.SubContent class="menu" collisionPadding={8}>
+              <ContextMenu.Item class={on.some((k) => blocks.some((b) => b.key === k)) ? '' : 'on'} onSelect={() => cmd().setParagraph().run()}><Pilcrow size={14} strokeWidth={1.6} />Texte</ContextMenu.Item>
+              {#each blocks as t}
+                <ContextMenu.Item class={on.includes(t.key) ? 'on' : ''} onSelect={() => t.run()}><t.icon size={14} strokeWidth={1.6} />{t.label}</ContextMenu.Item>
+              {/each}
+            </ContextMenu.SubContent>
+          </ContextMenu.Sub>
+          {#if on.includes('table')}
+            <ContextMenu.Sub>
+              <ContextMenu.SubTrigger><Table size={14} strokeWidth={1.6} />Tableau<ChevronRight class="sub" size={13} /></ContextMenu.SubTrigger>
+              <ContextMenu.SubContent class="menu" collisionPadding={8}>
+                {#each tableTools as t, i}
+                  {#if i === 3 || i === 6}<ContextMenu.Separator />{/if}
+                  <ContextMenu.Item class={t.danger ? 'danger' : ''} onSelect={() => t.run(cmd()).run()}>{@render icon(t, 14)}{t.label}</ContextMenu.Item>
+                {/each}
+              </ContextMenu.SubContent>
+            </ContextMenu.Sub>
+          {:else}
+            <ContextMenu.Item onSelect={() => tool('table').run()}><Table size={14} strokeWidth={1.6} />Insérer un tableau</ContextMenu.Item>
+          {/if}
+          <ContextMenu.Item onSelect={() => tool('image').run()}><Image size={14} strokeWidth={1.6} />Insérer une image</ContextMenu.Item>
+          <ContextMenu.Separator />
+          <ContextMenu.Item onSelect={() => cmd().selectAll().run()}><TextSelect size={14} strokeWidth={1.6} />Tout sélectionner<kbd>{mod}+A</kbd></ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
     {#if caret}
       <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px"></div>
     {/if}
