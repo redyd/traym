@@ -13,7 +13,7 @@ const ls = {
 }
 
 // what closing the window does: ask, or always do one of the popup's choices
-export type CloseAction = 'ask' | 'save' | 'sync'
+export type CloseAction = 'ask' | 'quit' | 'commit' | 'sync'
 
 // accent presets per theme (the light one is darker, for contrast on a light background)
 export const ACCENTS: Record<string, { dark: string; light: string }> = {
@@ -38,7 +38,7 @@ export const app = $state({
   accent: ls.get('accent') ?? 'orange', // a preset name (see ACCENTS) or a #rrggbb colour
   toolbarAlign: (ls.get('toolbarAlign') ?? 'center') as 'center' | 'left',
   pageAlign: (ls.get('pageAlign') ?? 'center') as 'center' | 'left',
-  onClose: (ls.get('onClose') ?? 'ask') as CloseAction,
+  onClose: (['quit', 'commit', 'sync'].includes(ls.get('onClose')!) ? ls.get('onClose') : 'ask') as CloseAction,
   settings: false, // the Settings page replaces the main view while open
   sidebar: ls.get('sidebar') !== '0',
   sidebarW: Number(ls.get('sidebarW') ?? 248),
@@ -124,21 +124,21 @@ export const resolve = (path: string, side: 'ours' | 'theirs' | 'manual') => bus
 
 export const abortMerge = () => busy(() => call('git_abort'))
 
-// closing the window: notes are already on disk; with git, "save" commits and "sync" also pushes.
-// The popup asks which (unless a choice was remembered); without a remote both mean the same, so no question.
+// closing the window: notes are already saved on disk, so the question is commit, or commit and push
+// (the latter only offered with a remote). Asked unless a choice was remembered.
+// Nothing changed, no git, or mid-conflict: nothing to commit, just close.
+// ponytail: commits left unpushed by an earlier "Commit" are not offered here; they go out on the next sync.
 export async function quit() {
   if (app.closing === 'busy' || app.closing === 'ask') return
-  if (!app.git || app.git.conflicts.length) {
-    await hooks.flush()
-    return getCurrentWindow().destroy()
-  }
-  const action = app.git.remote ? app.onClose : 'save'
-  if (action === 'ask') app.closing = 'ask'
-  else await leave(action)
+  await hooks.flush()
+  await gitStatus()
+  if (!app.git?.changes || app.git.conflicts.length) return getCurrentWindow().destroy()
+  if (app.onClose === 'ask') app.closing = 'ask'
+  else await leave(app.onClose)
 }
 
-/** The popup's choice (or the remembered one): save / save and sync, then really close. */
-export async function leave(action: 'save' | 'sync', remember = false) {
+/** The popup's choice (or the remembered one): commit, push too for sync, then really close. */
+export async function leave(action: 'quit' | 'commit' | 'sync', remember = false) {
   if (remember) {
     app.onClose = action
     persist()
@@ -146,7 +146,7 @@ export async function leave(action: 'save' | 'sync', remember = false) {
   app.closing = 'busy'
   try {
     await hooks.flush()
-    await invoke('git_sync', { push: action === 'sync' })
+    if (action !== 'quit') await invoke('git_sync', { push: action === 'sync' })
     await getCurrentWindow().destroy()
   } catch (e) {
     app.closing = { error: String(e) }

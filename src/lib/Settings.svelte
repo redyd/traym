@@ -151,7 +151,7 @@
       </div>
       <div class="field">
         <span class="label">{t('À la fermeture')}<small>{t('Avec un dépôt git distant. Sans, traym enregistre simplement dans git.')}</small></span>
-        {@render choice(t('À la fermeture'), app.onClose, [['ask', 'Demander'], ['save', 'Sauvegarder'], ['sync', 'Sauvegarder & synchroniser']], (v) => set('onClose', v))}
+        {@render choice(t('À la fermeture'), app.onClose, [['ask', 'Demander'], ['quit', 'Quitter sans commit'], ['commit', 'Commit'], ['sync', 'Commit & sync']], (v) => set('onClose', v))}
       </div>
     {:else if section === 'agents'}
       <h2>{t('Agents IA')}</h2>

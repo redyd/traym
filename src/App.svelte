@@ -3,9 +3,9 @@
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { open } from '@tauri-apps/plugin-dialog'
   import { documentDir, join } from '@tauri-apps/api/path'
-  import { Tooltip } from 'bits-ui'
+  import { Tooltip, AlertDialog, Checkbox } from 'bits-ui'
   import { Toaster } from 'svelte-sonner'
-  import { PanelLeft, Sparkles, Sun, Moon, Minus, Square, X, Settings } from '@lucide/svelte'
+  import { PanelLeft, Sparkles, Sun, Moon, Minus, Square, X, Settings, Check, CloudUpload, GitCommitHorizontal, TriangleAlert } from '@lucide/svelte'
   import Tip from './lib/Tip.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import Editor from './lib/Editor.svelte'
@@ -207,33 +207,51 @@
 
   {#if app.palette && !locked}<Palette {commands} />{/if}
 
-  {#if app.closing}
-    <div class="closing" role="alertdialog" aria-modal="true" aria-labelledby="closing-title">
-      <div class="card">
-        {#if app.closing === 'ask'}
-          <p id="closing-title">{t('Sauvegarder & synchroniser')}</p>
-          <p class="sub">{t('Enregistrer tes notes dans git avant de quitter, et les envoyer sur le dépôt distant ?')}</p>
-          <label class="remember"><input type="checkbox" bind:checked={remember} />{t('Se souvenir de mon choix')}</label>
-          <div class="actions">
-            <button onclick={() => (app.closing = null)}>{t('Annuler')}</button>
-            <button onclick={() => leave('save', remember)}>{t('Sauvegarder')}</button>
-            <!-- svelte-ignore a11y_autofocus -->
-            <button class="primary" autofocus onclick={() => leave('sync', remember)}>{t('Sauvegarder & synchroniser')}</button>
-          </div>
-        {:else if app.closing === 'busy'}
-          <span class="spinner" aria-hidden="true"></span>
-          <p id="closing-title">{t('Synchronisation…')}</p>
+  <AlertDialog.Root open={!!app.closing} onOpenChange={(o) => !o && app.closing !== 'busy' && (app.closing = null)}>
+    <AlertDialog.Portal>
+      <AlertDialog.Overlay class="dlg-scrim" />
+      <AlertDialog.Content class="dlg" interactOutsideBehavior="close">
+        {#if app.closing === 'busy'}
+          <div class="dlg-busy"><span class="spinner" aria-hidden="true"></span><AlertDialog.Title class="dlg-title">{t('Synchronisation…')}</AlertDialog.Title></div>
         {:else}
-          <p id="closing-title">{t('La synchronisation a échoué')}</p>
-          <pre>{app.closing.error}</pre>
-          <div class="actions">
-            <button onclick={() => (app.closing = null)}>{t('Annuler')}</button>
-            <button class="primary" onclick={() => win.destroy()}>{t('Quitter quand même')}</button>
+          {@const failed = typeof app.closing === 'object' && app.closing}
+          <div class="dlg-head">
+            <span class="dlg-icon">
+              {#if failed}<TriangleAlert size={18} strokeWidth={1.75} />{:else}<GitCommitHorizontal size={18} strokeWidth={1.75} />{/if}
+            </span>
+            <div>
+              <AlertDialog.Title class="dlg-title">{failed ? t('La synchronisation a échoué') : t('Avant de quitter')}</AlertDialog.Title>
+              <AlertDialog.Description class="dlg-desc">
+                {#if failed}{t('Tes notes sont enregistrées sur le disque, mais pas dans git.')}
+                {:else}{t(app.git?.changes === 1 ? '1 fichier modifié depuis le dernier commit.' : '{n} fichiers modifiés depuis le dernier commit.', { n: app.git?.changes ?? 0 })}{/if}
+              </AlertDialog.Description>
+              {#if !failed}
+                <Checkbox.Root class="remember" bind:checked={remember}>
+                  <span class="box"><Check size={11} strokeWidth={3} /></span>{t('Se souvenir de mon choix')}
+                </Checkbox.Root>
+              {/if}
+            </div>
+          </div>
+          {#if failed}<pre class="dlg-err">{failed.error}</pre>{/if}
+          <div class="dlg-foot">
+            {#if failed}
+              <AlertDialog.Cancel class="btn">{t('Annuler')}</AlertDialog.Cancel>
+              <AlertDialog.Action class="btn primary" onclick={() => win.destroy()}>{t('Quitter quand même')}</AlertDialog.Action>
+            {:else}
+              <AlertDialog.Action class="btn ghost" onclick={() => leave('quit', remember)}>{t('Quitter sans commit')}</AlertDialog.Action>
+              <AlertDialog.Cancel class="btn">{t('Annuler')}</AlertDialog.Cancel>
+              {#if app.git?.remote}
+                <AlertDialog.Action class="btn" onclick={() => leave('commit', remember)}>{t('Commit')}</AlertDialog.Action>
+                <AlertDialog.Action class="btn primary" onclick={() => leave('sync', remember)}><CloudUpload size={14} strokeWidth={2} />{t('Commit & sync')}</AlertDialog.Action>
+              {:else}
+                <AlertDialog.Action class="btn primary" onclick={() => leave('commit', remember)}>{t('Commit')}</AlertDialog.Action>
+              {/if}
+            {/if}
           </div>
         {/if}
-      </div>
-    </div>
-  {/if}
+      </AlertDialog.Content>
+    </AlertDialog.Portal>
+  </AlertDialog.Root>
 
   <Toaster theme={dark ? 'dark' : 'light'} position="bottom-center" closeButton duration={5000} />
 </div>
@@ -329,53 +347,91 @@
     animation: layer-in var(--t) var(--ease);
   }
 
-  .closing {
+  :global(.dlg-scrim) { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / 0.45); animation: layer-in var(--t) var(--ease); }
+  :global(.dlg) {
     position: fixed;
-    inset: 0;
-    z-index: 100;
-    display: grid;
-    place-items: center;
-    padding: 16px;
-    background: #0006;
-  }
-  .card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-    max-width: 440px;
-    padding: 22px 24px;
-    border-radius: 10px;
+    z-index: 101;
+    top: 50%;
+    left: 50%;
+    translate: -50% -50%;
+    width: min(540px, calc(100vw - 32px));
+    padding: 20px;
     background: var(--surface-solid);
     border: 1px solid var(--line);
-    font: 600 14px/1.4 var(--display);
+    border-radius: 12px;
+    box-shadow: 0 24px 60px -20px #000000a0;
+    animation: dlg-in var(--t) var(--ease);
   }
-  .card p { margin: 0; }
-  .card pre {
-    margin: 0;
+  :global(.dlg:focus-visible) { outline: none; }
+  @keyframes dlg-in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+  .dlg-head { display: flex; gap: 14px; align-items: flex-start; }
+  .dlg-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--orange-wash); color: var(--orange); }
+  :global(.dlg-title) { margin: 6px 0 4px; font: 650 15px/1.3 var(--display); color: var(--fg); }
+  :global(.dlg-desc) { margin: 0; font: 400 13px/1.5 var(--text); color: var(--muted); }
+  .dlg-err {
+    margin: 14px 0 0;
     max-height: 160px;
     overflow: auto;
+    padding: 10px 12px;
+    border-radius: var(--r);
+    background: var(--bg-deep);
     white-space: pre-wrap;
     font: 12px/1.5 var(--mono);
     color: var(--muted);
   }
+  .dlg-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  .dlg-busy { display: flex; align-items: center; gap: 12px; }
+  .dlg-busy :global(.dlg-title) { margin: 0; }
+  :global(.dlg .btn) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: var(--r);
+    border: 1px solid var(--line);
+    font: 600 13px/1.2 var(--display);
+    color: var(--fg);
+    white-space: nowrap;
+    transition: background var(--t-fast);
+  }
+  :global(.dlg .btn:hover) { background: var(--hover); }
+  :global(.dlg .btn.ghost) { margin-right: auto; border-color: transparent; color: var(--muted); }
+  :global(.dlg .btn.ghost:hover) { color: var(--fg); }
+  :global(.dlg .btn.primary) { background: var(--orange); border-color: var(--orange); color: var(--bg); }
+  :global(.dlg .btn.primary:hover) { filter: brightness(1.06); }
+  :global(.dlg .btn:focus-visible) { outline: 2px solid var(--orange); outline-offset: 2px; }
+  :global(.dlg .remember) {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 12px;
+    font: 500 12.5px/1.2 var(--display);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  :global(.dlg .remember .box) {
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    border: 1px solid var(--line);
+    flex: none;
+    box-sizing: border-box;
+    border-radius: 4px;
+    color: transparent;
+  }
+  :global(.dlg .remember[data-state='checked'] .box) { background: var(--orange); border-color: var(--orange); color: var(--bg); }
+  :global(.dlg .remember:focus-visible) { outline: none; }
+  :global(.dlg .remember:focus-visible .box) { outline: 2px solid var(--orange); outline-offset: 2px; }
   .spinner {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border: 2px solid var(--line);
     border-top-color: var(--orange);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .card .sub { max-width: 340px; text-align: center; font: 400 13px/1.5 var(--text); color: var(--muted); }
-  .remember { display: flex; align-items: center; gap: 7px; font: 500 12.5px/1.2 var(--display); color: var(--muted); cursor: pointer; }
-  .remember input { accent-color: var(--orange); margin: 0; }
-  .actions { display: flex; gap: 8px; }
-  .actions button { padding: 8px 12px; border-radius: var(--r); font-weight: 600; white-space: nowrap; }
-  .actions button:hover { background: var(--hover); }
-  .actions .primary { background: var(--orange); color: var(--bg); }
-  .actions .primary:hover { background: var(--orange); filter: brightness(1.06); }
 
   .welcome {
     display: flex;
