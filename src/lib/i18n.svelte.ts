@@ -17,6 +17,15 @@ export function t(fr: string, vars: Record<string, string | number> = {}) {
 
 const en: Record<string, string> = {
   // app shell
+  'Lien ({mod}+L)': 'Link ({mod}+L)',
+  'Ouvrir le lien': 'Open link',
+  'Modifier le lien': 'Edit link',
+  'Retirer le lien': 'Remove link',
+  'Insérer un lien': 'Insert link',
+  clic: 'click',
+  'Note introuvable : {p}': 'Note not found: {p}',
+  'https://… ou chemin/vers/note.md': 'https://… or path/to/note.md',
+  'Adresse du lien': 'Link address',
   'traym {v} est disponible': 'traym {v} is available',
   'Installer et redémarrer': 'Install and restart',
   'Mise à jour…': 'Updating…',

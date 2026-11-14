@@ -7,15 +7,16 @@
   import { DropdownMenu, ContextMenu } from 'bits-ui'
   import { convertFileSrc, invoke } from '@tauri-apps/api/core'
   import { open } from '@tauri-apps/plugin-dialog'
+  import { openUrl } from '@tauri-apps/plugin-opener'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
-    Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus, Scissors, Copy, ClipboardPaste, TextSelect, Pilcrow, ChevronRight,
+    Link, ExternalLink, Unlink, Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus, Scissors, Copy, ClipboardPaste, TextSelect, Pilcrow, ChevronRight,
   } from '@lucide/svelte'
   import TableIcon, { type TableOp } from './TableIcon.svelte'
   import { extensions, split, media } from './schema'
   import Tip from './Tip.svelte'
   import { t as tr } from './i18n.svelte'
-  import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists } from './store.svelte'
+  import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists, persist } from './store.svelte'
 
   let host: HTMLDivElement
   let scroller: HTMLDivElement
@@ -88,6 +89,7 @@
       'Mod-i': () => mark('italic'),
       'Mod-Shift-s': () => mark('strike'),
       'Mod-e': () => mark('code'),
+      'Mod-l': () => (editLink(), true), // Mod-K is the command palette
       'Mod-Enter': exit,
       Enter: enter,
     }),
@@ -105,6 +107,7 @@
     { key: 'italic', label: 'Italique ({mod}+I)', icon: Italic, run: () => mark('italic'), active: is('italic') },
     { key: 'strike', label: 'Barré ({mod}+Maj+S)', icon: Strikethrough, run: () => mark('strike'), active: is('strike') },
     { key: 'code', label: 'Code ({mod}+E)', icon: Code, run: () => mark('code'), active: is('code') },
+    { key: 'link', label: 'Lien ({mod}+L)', icon: Link, run: () => editLink(), active: is('link') },
     null,
     { key: 'codeBlock', label: 'Bloc de code', icon: SquareCode, run: () => cmd().toggleCodeBlock().run(), active: is('codeBlock') },
     { key: 'quote', label: 'Citation', icon: TextQuote, run: () => cmd().toggleBlockquote().run(), active: is('blockquote') },
@@ -183,6 +186,38 @@
     } catch {
       flash(tr('Collage impossible depuis le menu ici : utilise {mod}+V', { mod }))
     }
+  }
+
+  // links: a small field under the link (or the selection) to set, change or remove its target
+  let linkAt = $state<{ x: number; y: number; href: string } | null>(null)
+  function editLink() {
+    const e = editor!
+    e.chain().focus().extendMarkRange('link').run() // caret inside a link: take the whole link
+    const c = e.view.coordsAtPos(e.state.selection.from), p = page.getBoundingClientRect()
+    linkAt = { x: Math.max(0, Math.min(c.left - p.left, p.width - 340)), y: c.bottom - p.top + 6, href: e.getAttributes('link').href ?? '' }
+  }
+  function applyLink(href: string) {
+    linkAt = null
+    href = href.trim()
+    const c = editor!.chain().focus().extendMarkRange('link')
+    if (!href) return c.unsetLink().run()
+    // nothing selected: the address becomes the link's text
+    if (editor!.state.selection.empty) return c.insertContent({ type: 'text', text: href, marks: [{ type: 'link', attrs: { href } }] }).run()
+    c.setLink({ href }).run()
+  }
+
+  /** Ctrl/Cmd+click: web and mail links open in the system's apps, a relative link to a note opens it here. */
+  function follow(href: string) {
+    if (/^(https?|mailto):/i.test(href)) return void openUrl(href).catch((e) => flash(String(e)))
+    if (/^[a-z][\w+.-]*:/i.test(href) || href.startsWith('#')) return // other schemes (file:…) and anchors: not followed
+    let rel = href.split('#')[0]
+    try { rel = decodeURI(rel) } catch {}
+    const parts: string[] = rel.startsWith('/') ? [] : parent(path ?? '').split('/').filter(Boolean)
+    for (const s of rel.split('/')) s === '..' ? parts.pop() : s && s !== '.' && parts.push(s)
+    const to = [parts.join('/'), parts.join('/') + '.md'].find((p) => p.endsWith('.md') && exists(p))
+    if (!to) return flash(tr('Note introuvable : {p}', { p: href }))
+    app.current = to
+    persist()
   }
 
   function openMenu(k: 'row' | 'col', o: boolean) {
@@ -306,6 +341,13 @@
           if (p.length) embedPaths(p)
           return p.length > 0
         },
+        handleClick: (_v, _pos, e) => {
+          const a = (e.ctrlKey || e.metaKey) && (e.target as HTMLElement).closest('a[href]')
+          if (!a) return false
+          e.preventDefault()
+          follow(a.getAttribute('href')!)
+          return true
+        },
         handleDrop: (v, e) => {
           const p = imagePaths(e.dataTransfer)
           if (!p.length) return false
@@ -391,6 +433,11 @@
       })
     }
     host.addEventListener('pointerdown', down)
+    const modKey = (e: KeyboardEvent) => document.documentElement.classList.toggle('mod-down', e.ctrlKey || e.metaKey)
+    const modOff = () => document.documentElement.classList.remove('mod-down')
+    window.addEventListener('keydown', modKey)
+    window.addEventListener('keyup', modKey)
+    window.addEventListener('blur', modOff)
     window.addEventListener('pointerup', up)
     host.addEventListener('mousemove', track)
     host.addEventListener('mouseleave', leave)
@@ -414,6 +461,9 @@
     })
     return () => {
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('keydown', modKey)
+      window.removeEventListener('keyup', modKey)
+      window.removeEventListener('blur', modOff)
       ro.disconnect()
       save()
       un.then((f) => f())
@@ -501,6 +551,14 @@
             {/each}
           {/if}
           <ContextMenu.Separator />
+          {#if on.includes('link')}
+            <ContextMenu.Item onSelect={() => follow(editor!.getAttributes('link').href)}><ExternalLink size={14} strokeWidth={1.6} />{tr('Ouvrir le lien')}<kbd>{mod}+{tr('clic')}</kbd></ContextMenu.Item>
+            <ContextMenu.Item onSelect={editLink}><Link size={14} strokeWidth={1.6} />{tr('Modifier le lien')}<kbd>{mod}+L</kbd></ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => cmd().extendMarkRange('link').unsetLink().run()}><Unlink size={14} strokeWidth={1.6} />{tr('Retirer le lien')}</ContextMenu.Item>
+          {:else}
+            <ContextMenu.Item onSelect={editLink}><Link size={14} strokeWidth={1.6} />{tr('Insérer un lien')}<kbd>{mod}+L</kbd></ContextMenu.Item>
+          {/if}
+          <ContextMenu.Separator />
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger><Pilcrow size={14} strokeWidth={1.6} />{tr('Transformer en')}<ChevronRight class="sub" size={13} /></ContextMenu.SubTrigger>
             <ContextMenu.SubContent class="menu" collisionPadding={8}>
@@ -529,6 +587,16 @@
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
+    {#if linkAt}
+      <input class="linkfield" style:left="{linkAt.x}px" style:top="{linkAt.y}px" value={linkAt.href} spellcheck="false"
+        {@attach (el) => { requestAnimationFrame(() => (el.focus(), el.select())) }}
+        placeholder={tr('https://… ou chemin/vers/note.md')} aria-label={tr('Adresse du lien')}
+        onkeydown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); applyLink(e.currentTarget.value) }
+          if (e.key === 'Escape') { e.preventDefault(); linkAt = null; editor?.commands.focus() }
+        }}
+        onblur={() => (linkAt = null)} />
+    {/if}
     {#if caret}
       <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px"></div>
     {/if}
@@ -812,6 +880,22 @@
     border-color: var(--orange);
   }
 
+  /* Ctrl/Cmd held: links show they can be opened */
+  :global(.mod-down .tiptap a) { cursor: pointer; }
+  .linkfield {
+    position: absolute;
+    z-index: 60;
+    width: min(340px, 80%);
+    padding: 7px 10px;
+    font: 500 13px/1.2 var(--mono, monospace);
+    color: var(--fg);
+    background: var(--surface-solid);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px -10px #00000066;
+    outline: none;
+  }
+  .linkfield:focus { border-color: var(--orange); }
   :global(.tiptap hr) { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
   :global(.tiptap hr.ProseMirror-selectednode) { border-top-color: var(--orange); }
   :global(.tiptap img) { max-width: 100%; border-radius: var(--r); }
