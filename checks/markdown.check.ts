@@ -29,6 +29,15 @@ const kept = [
   '![img](pic.png)',
   'a < b & c > d, l\'été, 50% — ok. file_name.md, [[other note]], 3 * 4.',
   'a\n\n\n\nb',
+  'See [[other note]], [[dir/note|alias]] and ==marked== text.',
+  'Euler: $e^{i\\pi} + 1 = 0$, but $5 and $10 stay text.',
+  '$$\nx^2\n$$',
+  'A claim[^1] and another[^note].',
+  '[^1]: The source, see https://x.y.',
+  '[^note]: Second one.',
+  '> [!warning] Careful\n> body',
+  '1. one\n2. two\n\n---\n\nafter',
+  '```js\nconst a = 1\n```',
 ]
 const sample = kept.join('\n\n')
 const out = trip(sample)
@@ -37,6 +46,6 @@ assert.match(trip('| a | b |\n|---|---|\n| 1 | 2 |'), /\| a +\| b +\|\n\| -+ \| 
 assert.equal(trip(out), out, 'not stable on a second trip')
 
 // literal syntax characters still round-trip as text, not formatting
-for (const t of ['*not em*', '_x_', '`tick`', '<b>', '&amp;', '~~no~~', 'a\\b'])
+for (const t of ['*not em*', '_x_', '`tick`', '<b>', '&amp;', '~~no~~', 'a\\b', '$x$', 'costs $5', '$'])
   assert.equal(md.parse(escape(t)).content?.[0]?.content?.[0]?.text, t, `escape(${t})`)
 console.log('markdown ok')

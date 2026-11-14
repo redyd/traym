@@ -10,13 +10,15 @@
   import { openUrl } from '@tauri-apps/plugin-opener'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
-    Link, ExternalLink, Unlink, Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus, Scissors, Copy, ClipboardPaste, TextSelect, Pilcrow, ChevronRight,
+    Link, ExternalLink, Unlink, ListOrdered, Minus, Highlighter, Sigma, SquareSigma, Superscript, FileText, Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus, Scissors, Copy, ClipboardPaste, TextSelect, Pilcrow, ChevronRight,
   } from '@lucide/svelte'
   import TableIcon, { type TableOp } from './TableIcon.svelte'
-  import { extensions, split, media } from './schema'
+  import { extensions, split, media, ui } from './schema'
+  import Suggestion from '@tiptap/suggestion'
+  import 'katex/dist/katex.min.css'
   import Tip from './Tip.svelte'
   import { t as tr } from './i18n.svelte'
-  import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists, persist } from './store.svelte'
+  import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists, persist, flat, refresh } from './store.svelte'
 
   let host: HTMLDivElement
   let scroller: HTMLDivElement
@@ -90,6 +92,7 @@
       'Mod-Shift-s': () => mark('strike'),
       'Mod-e': () => mark('code'),
       'Mod-l': () => (editLink(), true), // Mod-K is the command palette
+      'Mod-Shift-h': () => editor!.chain().focus().toggleHighlight().run(),
       'Mod-Enter': exit,
       Enter: enter,
     }),
@@ -107,15 +110,18 @@
     { key: 'italic', label: 'Italique ({mod}+I)', icon: Italic, run: () => mark('italic'), active: is('italic') },
     { key: 'strike', label: 'Barré ({mod}+Maj+S)', icon: Strikethrough, run: () => mark('strike'), active: is('strike') },
     { key: 'code', label: 'Code ({mod}+E)', icon: Code, run: () => mark('code'), active: is('code') },
+    { key: 'highlight', label: 'Surligner ({mod}+Maj+H)', icon: Highlighter, run: () => cmd().toggleHighlight().run(), active: is('highlight') },
     { key: 'link', label: 'Lien ({mod}+L)', icon: Link, run: () => editLink(), active: is('link') },
     null,
     { key: 'codeBlock', label: 'Bloc de code', icon: SquareCode, run: () => cmd().toggleCodeBlock().run(), active: is('codeBlock') },
     { key: 'quote', label: 'Citation', icon: TextQuote, run: () => cmd().toggleBlockquote().run(), active: is('blockquote') },
     { key: 'list', label: 'Liste', icon: List, run: () => cmd().toggleBulletList().run(), active: is('bulletList') },
+    { key: 'ordered', label: 'Liste numérotée', icon: ListOrdered, run: () => cmd().toggleOrderedList().run(), active: is('orderedList') },
     { key: 'task', label: 'Tâches', icon: ListChecks, run: () => cmd().toggleTaskList().run(), active: is('taskList') },
     null,
     { key: 'table', label: 'Tableau', icon: Table, run: () => cmd().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: is('table') },
     { key: 'image', label: 'Image', icon: Image, run: () => image(), active: is('image') },
+    { key: 'hr', label: 'Séparateur', icon: Minus, run: () => cmd().setHorizontalRule().run(), active: () => false },
   ]
   // Notion-style table controls, shown on hover only: a grip beside the hovered row / above the hovered
   // column opens a small menu, and thin "+" strips under / right of the table add a row / column at the end
@@ -162,7 +168,7 @@
   // right-click menu: what the toolbar offers, plus the clipboard, scoped to where the click landed
   let picked = $state(false) // a non-empty selection
   const tool = (k: string) => tools.find((t) => t?.key === k)!
-  const blocks = ['h1', 'h2', 'h3', 'list', 'task', 'quote', 'codeBlock'].map(tool)
+  const blocks = ['h1', 'h2', 'h3', 'list', 'ordered', 'task', 'quote', 'codeBlock'].map(tool)
 
   function aim(e: MouseEvent) {
     const v = editor?.view
@@ -189,15 +195,18 @@
   }
 
   // links: a small field under the link (or the selection) to set, change or remove its target
-  let linkAt = $state<{ x: number; y: number; href: string } | null>(null)
+  type Field = { x: number; y: number; value: string; hint: string; label: string; apply: (v: string) => unknown }
+  let field = $state<Field | null>(null)
+  function ask(pos: number, f: Omit<Field, 'x' | 'y'>) {
+    const c = editor!.view.coordsAtPos(pos), p = page.getBoundingClientRect()
+    field = { ...f, x: Math.max(0, Math.min(c.left - p.left, p.width - 340)), y: c.bottom - p.top + 6 }
+  }
   function editLink() {
     const e = editor!
     e.chain().focus().extendMarkRange('link').run() // caret inside a link: take the whole link
-    const c = e.view.coordsAtPos(e.state.selection.from), p = page.getBoundingClientRect()
-    linkAt = { x: Math.max(0, Math.min(c.left - p.left, p.width - 340)), y: c.bottom - p.top + 6, href: e.getAttributes('link').href ?? '' }
+    ask(e.state.selection.from, { value: e.getAttributes('link').href ?? '', hint: tr('https://… ou chemin/vers/note.md'), label: tr('Adresse du lien'), apply: applyLink })
   }
   function applyLink(href: string) {
-    linkAt = null
     href = href.trim()
     const c = editor!.chain().focus().extendMarkRange('link')
     if (!href) return c.unsetLink().run()
@@ -205,6 +214,115 @@
     if (editor!.state.selection.empty) return c.insertContent({ type: 'text', text: href, marks: [{ type: 'link', attrs: { href } }] }).run()
     c.setLink({ href }).run()
   }
+
+  // formulas: KaTeX, edited as LaTeX in the same field; clicking one opens it
+  ui.math = (latex, pos, block) =>
+    ask(pos, {
+      value: latex, hint: 'e^{i\\pi} + 1 = 0', label: tr('Formule (LaTeX)'),
+      apply: (v) => {
+        const c = editor!.chain().focus()
+        if (!v.trim()) return (block ? c.deleteBlockMath({ pos }) : c.deleteInlineMath({ pos })).run()
+        ;(block ? c.updateBlockMath({ latex: v, pos }) : c.updateInlineMath({ latex: v, pos })).run()
+      },
+    })
+  function newMath(block: boolean) {
+    const e = editor!, { from, to } = e.state.selection
+    const picked = e.state.doc.textBetween(from, to)
+    ask(from, {
+      value: picked, hint: 'e^{i\\pi} + 1 = 0', label: tr('Formule (LaTeX)'),
+      apply: (v) => v.trim() && e.chain().focus().deleteRange({ from, to }).command(({ commands }) => (block ? commands.insertBlockMath({ latex: v, pos: from }) : commands.insertInlineMath({ latex: v, pos: from }))).run(),
+    })
+  }
+
+  // footnotes: a [^n] here, its [^n]: definition at the end of the note, caret there to write it
+  function footnote() {
+    const e = editor!
+    let n = 0
+    e.state.doc.descendants((node) => { if (node.type.name === 'footnote') n = Math.max(n, Number(node.attrs.id) || 0) })
+    const id = String(n + 1)
+    e.chain().focus().insertContent({ type: 'footnoteRef', attrs: { id } }).run()
+    // before the empty paragraph the editor keeps at the end (StarterKit's trailing node)
+    const doc = e.state.doc, last = doc.lastChild!
+    const end = last.type.name === 'paragraph' && !last.content.size ? doc.content.size - last.nodeSize : doc.content.size
+    e.commands.insertContentAt(end, { type: 'footnote', attrs: { id } })
+    toFootnote(id)
+  }
+  function toFootnote(id: string) {
+    let at = -1
+    editor!.state.doc.descendants((node, pos) => { if (at < 0 && node.type.name === 'footnote' && node.attrs.id === id) at = pos })
+    if (at < 0) return flash(tr('Note de bas de page [^{id}] sans définition', { id }))
+    editor!.chain().focus().setTextSelection(at + 1).scrollIntoView().run()
+  }
+
+  // [[wiki links]]: a note by name (anywhere in the vault, the nearest first) or by path
+  const noExt = (p: string) => p.replace(/\.md$/, '')
+  function wikiTarget(p: string) {
+    const base = noExt(p.split('/').pop()!)
+    return flat().filter((q) => noExt(q.split('/').pop()!) === base).length > 1 ? noExt(p) : base
+  }
+  function resolveWiki(target: string) {
+    const t = target.split('#')[0].trim().replace(/\.md$/, '')
+    const all = flat(), here = parent(path ?? '')
+    return all.find((p) => noExt(p) === t) ?? all.filter((p) => noExt(p).endsWith('/' + t) || noExt(p) === t).sort((a, b) => Number(parent(b) === here) - Number(parent(a) === here))[0]
+  }
+  async function openWiki(target: string) {
+    let to = resolveWiki(target)
+    if (!to) {
+      // like Obsidian: following a link to a note that doesn't exist yet creates it, next to this one
+      const name = target.split('#')[0].trim().replace(/\.md$/, '')
+      if (!name) return
+      to = name.includes('/') ? name + '.md' : join(parent(path ?? ''), name + '.md')
+      try {
+        await call('create_note', { path: to })
+        await refresh()
+      } catch {
+        return
+      }
+    }
+    app.current = to
+    persist()
+  }
+  type Sug = { items: string[]; index: number; x: number; y: number; pick: (p: string) => void }
+  let sug = $state<Sug | null>(null)
+  const wikiSuggest = Extension.create({
+    name: 'wikiSuggest',
+    addProseMirrorPlugins() {
+      return [Suggestion<string>({
+        editor: this.editor,
+        char: '[[',
+        allowSpaces: true,
+        allowedPrefixes: null,
+        items: ({ query }) => {
+          const q = query.toLowerCase()
+          return flat().filter((p) => p !== path && p.toLowerCase().includes(q)).slice(0, 8)
+        },
+        command: ({ editor: e, range, props }) => {
+          e.chain().focus().insertContentAt(range, [{ type: 'wikiLink', attrs: { target: wikiTarget(props) } }, { type: 'text', text: ' ' }]).run()
+        },
+        render: () => {
+          const show = (p: any) => {
+            const r = p.clientRect?.(), pg = page.getBoundingClientRect()
+            if (!r || !p.items.length) return void (sug = null)
+            sug = { items: p.items, index: Math.min(sug?.index ?? 0, p.items.length - 1), x: r.left - pg.left, y: r.bottom - pg.top + 4, pick: (it) => p.command(it) }
+          }
+          return {
+            onStart: show,
+            onUpdate: show,
+            onExit: () => (sug = null),
+            onKeyDown: ({ event }) => {
+              if (!sug) return false
+              const n = sug.items.length
+              if (event.key === 'ArrowDown') return (sug.index = (sug.index + 1) % n), true
+              if (event.key === 'ArrowUp') return (sug.index = (sug.index + n - 1) % n), true
+              if (event.key === 'Enter' || event.key === 'Tab') return sug.pick(sug.items[sug.index]), true
+              if (event.key === 'Escape') return (sug = null), true
+              return false
+            },
+          }
+        },
+      })]
+    },
+  })
 
   /** Ctrl/Cmd+click: web and mail links open in the system's apps, a relative link to a note opens it here. */
   function follow(href: string) {
@@ -298,6 +416,8 @@
   }
   let barEl: HTMLDivElement
   let on = $state<string[]>([])
+  let lang = $state('') // the code block's language, for the toolbar's picker
+  const LANGS = ['bash', 'c', 'cpp', 'csharp', 'css', 'diff', 'go', 'java', 'javascript', 'json', 'kotlin', 'lua', 'markdown', 'php', 'python', 'ruby', 'rust', 'sql', 'swift', 'typescript', 'xml', 'yaml']
   let dragging = false
   // selection toolbar: Tiptap's bubble menu, placed by floating-ui (flips below / shifts sideways to stay in view)
   const bubble = () =>
@@ -318,7 +438,7 @@
     clearTimeout(timer)
     if (!path || !editor) return
     const md = text()
-    if (md === saved) return
+    if (md === saved) return void (status = 'saved') // an update that changed nothing on disk (e.g. a node view settling)
     status = 'saving'
     await call('write_note', { path, content: md })
     saved = md
@@ -331,7 +451,7 @@
     editor?.destroy()
     editor = new Editor({
       element: host,
-      extensions: [...extensions, Markdown, keys, bubble(), files],
+      extensions: [...extensions, Markdown, keys, bubble(), files, wikiSuggest],
       content: body,
       contentType: 'markdown',
       // these run before plugins, so file:// images are taken here and real files fall through to FileHandler
@@ -342,10 +462,14 @@
           return p.length > 0
         },
         handleClick: (_v, _pos, e) => {
-          const a = (e.ctrlKey || e.metaKey) && (e.target as HTMLElement).closest('a[href]')
-          if (!a) return false
+          if (!(e.ctrlKey || e.metaKey)) return false
+          const el = e.target as HTMLElement
+          const wiki = el.closest('a[data-wiki]'), fn = el.closest('sup[data-fn]'), a = el.closest('a[href]')
+          if (!wiki && !fn && !a) return false
           e.preventDefault()
-          follow(a.getAttribute('href')!)
+          if (wiki) openWiki(wiki.getAttribute('data-wiki')!)
+          else if (fn) toFootnote(fn.getAttribute('data-fn')!)
+          else follow(a!.getAttribute('href')!)
           return true
         },
         handleDrop: (v, e) => {
@@ -360,6 +484,7 @@
       onTransaction: () => {
         const a = tools.filter((t) => t?.active()).map((t) => t!.key)
         if (a.join() !== on.join()) on = a
+        lang = editor?.isActive('codeBlock') ? editor.getAttributes('codeBlock').language ?? '' : ''
         moveCaret()
       },
       onFocus: moveCaret,
@@ -480,6 +605,15 @@
       <span class="sep"></span>
     {/if}
   {/each}
+  {#if table && on.includes('codeBlock')}
+    <span class="sep"></span>
+    <select class="lang" aria-label={tr('Langage du bloc de code')} value={lang}
+      onchange={(e) => cmd().updateAttributes('codeBlock', { language: e.currentTarget.value || null }).run()}>
+      <option value="">{tr('Texte brut')}</option>
+      {#each LANGS as l}<option value={l}>{l}</option>{/each}
+      {#if lang && !LANGS.includes(lang)}<option value={lang}>{lang}</option>{/if}
+    </select>
+  {/if}
   {#if table && on.includes('table')}
     <span class="sep"></span>
     {#each tableTools as t, i}
@@ -582,20 +716,42 @@
             <ContextMenu.Item onSelect={() => tool('table').run()}><Table size={14} strokeWidth={1.6} />{tr('Insérer un tableau')}</ContextMenu.Item>
           {/if}
           <ContextMenu.Item onSelect={() => tool('image').run()}><Image size={14} strokeWidth={1.6} />{tr('Insérer une image')}</ContextMenu.Item>
+          <ContextMenu.Sub>
+            <ContextMenu.SubTrigger><Plus size={14} strokeWidth={1.6} />{tr('Insérer')}<ChevronRight class="sub" size={13} /></ContextMenu.SubTrigger>
+            <ContextMenu.SubContent class="menu" collisionPadding={8}>
+              <ContextMenu.Item onSelect={() => cmd().insertContent('[[').run()}><FileText size={14} strokeWidth={1.6} />{tr('Lien vers une note')}<kbd>[[</kbd></ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => newMath(false)}><Sigma size={14} strokeWidth={1.6} />{tr('Formule')}<kbd>$…$</kbd></ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => newMath(true)}><SquareSigma size={14} strokeWidth={1.6} />{tr('Formule centrée')}<kbd>$$…$$</kbd></ContextMenu.Item>
+              <ContextMenu.Item onSelect={footnote}><Superscript size={14} strokeWidth={1.6} />{tr('Note de bas de page')}<kbd>[^1]</kbd></ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => cmd().insertContent([{ type: 'blockquote', content: [{ type: 'paragraph', content: [{ type: 'text', text: '[!note] ' }] }] }]).run()}><TextQuote size={14} strokeWidth={1.6} />{tr('Encadré')}<kbd>&gt; [!note]</kbd></ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => tool('hr').run()}><Minus size={14} strokeWidth={1.6} />{tr('Séparateur')}<kbd>---</kbd></ContextMenu.Item>
+            </ContextMenu.SubContent>
+          </ContextMenu.Sub>
           <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => cmd().selectAll().run()}><TextSelect size={14} strokeWidth={1.6} />{tr('Tout sélectionner')}<kbd>{mod}+A</kbd></ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
-    {#if linkAt}
-      <input class="linkfield" style:left="{linkAt.x}px" style:top="{linkAt.y}px" value={linkAt.href} spellcheck="false"
+    {#if field}
+      {@const f = field}
+      <input class="linkfield" style:left="{f.x}px" style:top="{f.y}px" value={f.value} spellcheck="false"
         {@attach (el) => { requestAnimationFrame(() => (el.focus(), el.select())) }}
-        placeholder={tr('https://… ou chemin/vers/note.md')} aria-label={tr('Adresse du lien')}
+        placeholder={f.hint} aria-label={f.label}
         onkeydown={(e) => {
-          if (e.key === 'Enter') { e.preventDefault(); applyLink(e.currentTarget.value) }
-          if (e.key === 'Escape') { e.preventDefault(); linkAt = null; editor?.commands.focus() }
+          // read f before clearing: it is derived from `field`
+          if (e.key === 'Enter') { e.preventDefault(); const { apply } = f, v = e.currentTarget.value; field = null; apply(v) }
+          if (e.key === 'Escape') { e.preventDefault(); field = null; editor?.commands.focus() }
         }}
-        onblur={() => (linkAt = null)} />
+        onblur={() => (field = null)} />
+    {/if}
+    {#if sug}
+      <div class="menu sug" role="listbox" style:left="{sug.x}px" style:top="{sug.y}px">
+        {#each sug.items as it, i}
+          <button role="option" aria-selected={i === sug.index} class:on={i === sug.index} onmousedown={(e) => { e.preventDefault(); sug!.pick(it) }}>
+            <FileText size={13} strokeWidth={1.6} /><span>{title(it)}</span><small>{parent(it)}</small>
+          </button>
+        {/each}
+      </div>
     {/if}
     {#if caret}
       <div class="caret" bind:this={caretEl} style:transform="translate({caret.x}px, {caret.y}px)" style:height="{caret.h}px"></div>
@@ -835,6 +991,67 @@
     text-decoration-color: color-mix(in srgb, var(--orange) 40%, transparent);
     text-underline-offset: 3px;
   }
+
+  :global(.tiptap mark) { color: inherit; background: color-mix(in srgb, var(--amber) 30%, transparent); border-radius: 2px; padding: 0 1px; }
+  /* [[wiki links]] and footnote refs: atoms, opened with Ctrl/Cmd+click */
+  :global(.tiptap a.wiki) { text-decoration: none; border-bottom: 1px dashed color-mix(in srgb, var(--orange) 50%, transparent); }
+  :global(.tiptap a.wiki::before) { content: '[['; opacity: .35; }
+  :global(.tiptap a.wiki::after) { content: ']]'; opacity: .35; }
+  :global(.tiptap a.wiki.ProseMirror-selectednode), :global(.tiptap sup.fn.ProseMirror-selectednode) { background: var(--select); border-radius: 3px; }
+  :global(.tiptap sup.fn) { color: var(--orange); font: 600 .72em var(--display); padding: 0 1px; }
+  :global(.mod-down .tiptap :is(a.wiki, sup.fn)) { cursor: pointer; }
+  :global(.tiptap .fn-def) { display: flex; gap: 8px; font-size: .9em; color: var(--muted); }
+  :global(.tiptap .fn-def:first-of-type) { border-top: 1px solid var(--line-soft); padding-top: .8em; margin-top: 1.4em; }
+  :global(.tiptap .fn-id) { flex: none; color: var(--orange); font: 600 .8em/2 var(--display); }
+  :global(.tiptap .fn-id::after) { content: '.'; }
+  /* > [!kind] callouts */
+  :global(.tiptap blockquote.callout) { --c: var(--orange); border-left-color: var(--c); background: color-mix(in srgb, var(--c) 7%, transparent); border-radius: 0 6px 6px 0; padding: .55em .9em; color: var(--fg); }
+  :global(.tiptap blockquote.callout:is([data-callout='warning'], [data-callout='caution'], [data-callout='attention'])) { --c: var(--amber); }
+  :global(.tiptap blockquote.callout:is([data-callout='danger'], [data-callout='error'], [data-callout='bug'], [data-callout='failure'])) { --c: #e5484d; }
+  :global(.tiptap blockquote.callout:is([data-callout='tip'], [data-callout='success'], [data-callout='check'], [data-callout='done'])) { --c: #3fa66a; }
+  :global(.tiptap blockquote.callout:is([data-callout='note'], [data-callout='info'], [data-callout='todo'], [data-callout='abstract'], [data-callout='question'])) { --c: #4d8fdb; }
+  :global(.tiptap .callout-title) { font-weight: 640; }
+  :global(.tiptap .callout-kind) { color: var(--c); font: 600 .78em var(--mono); letter-spacing: .02em; }
+  /* math (KaTeX): click to edit */
+  :global(.tiptap :is(.tiptap-mathematics-render, [data-type='inline-math'], [data-type='block-math'])) { cursor: pointer; border-radius: 4px; }
+  :global(.tiptap :is([data-type='inline-math'], [data-type='block-math']):hover) { background: var(--hover); }
+  :global(.tiptap [data-type='block-math']) { display: block; text-align: center; padding: .4em 0; }
+  /* syntax highlighting (lowlight / highlight.js classes), from the theme's own colours */
+  :global(.tiptap pre :is(.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-doctag)) { color: var(--orange); }
+  :global(.tiptap pre :is(.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute)) { color: #3fa66a; }
+  :global(.tiptap pre :is(.hljs-number, .hljs-literal, .hljs-symbol, .hljs-variable.language_)) { color: #4d8fdb; }
+  :global(.tiptap pre :is(.hljs-title, .hljs-section, .hljs-type, .hljs-name, .hljs-selector-class)) { color: var(--amber); }
+  :global(.tiptap pre :is(.hljs-comment, .hljs-quote, .hljs-meta)) { color: var(--faint); font-style: italic; }
+  :global(.tiptap pre .hljs-deletion) { color: #e5484d; }
+  :global(.tiptap pre :is(.hljs-attr, .hljs-property, .hljs-params)) { color: var(--muted); }
+
+  .lang {
+    height: 26px;
+    padding: 0 6px;
+    font: 500 12px var(--mono);
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line-soft);
+    border-radius: 5px;
+  }
+  .sug { position: absolute; min-width: 240px; max-width: 360px; }
+  .sug button {
+    all: unset;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 5px;
+    font: 500 13px/1.2 var(--display);
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .sug button :global(svg) { flex: none; color: var(--muted); }
+  .sug button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sug button small { margin-left: auto; padding-left: 12px; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+  .sug button.on { background: var(--orange-wash); }
 
   :global(.tiptap pre) {
     font: 400 13.5px/1.65 var(--mono);
