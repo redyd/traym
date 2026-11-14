@@ -12,7 +12,7 @@ A desktop markdown note editor with git sync and a built-in AI assistant. Built 
 
 ## Install
 
-Download the build for your system from the [releases](../../releases): AppImage or RPM (Linux), installer (Windows), DMG (macOS).
+Download the build for your system from the [releases](../../releases): AppImage (Linux), installer (Windows), DMG (macOS).
 
 `git` must be installed for sync. The AI panel uses the `claude` / `codex` CLIs if they are on your machine.
 
