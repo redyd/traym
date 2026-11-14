@@ -117,7 +117,11 @@
     ;(async () => app.vault ?? join(await documentDir(), 'traym'))()
       .then(openVault)
       .catch(() => (app.vault = null))
-      .finally(() => (ready = true))
+      .finally(() => {
+        ready = true
+        // the window starts hidden (tauri.conf.json): shown once the first themed frame is painted
+        requestAnimationFrame(() => requestAnimationFrame(() => win.show()))
+      })
   })
 
   // density and language apply to the whole document (CSS variables, lang attribute)

@@ -277,6 +277,14 @@ fn main() {
                 settings_path,
             });
             tauri::async_runtime::spawn(mcp::run(listener, core.clone()));
+            // the page shows the window once themed; if it never does (crash, slow start), don't stay invisible
+            let win = app.get_webview_window("main").ok_or("no main window")?;
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                if !win.is_visible().unwrap_or(true) {
+                    let _ = win.show();
+                }
+            });
             app.manage(core);
             Ok(())
         })
