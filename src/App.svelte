@@ -11,7 +11,7 @@
   import Editor from './lib/Editor.svelte'
   import AgentPanel from './lib/AgentPanel.svelte'
   import { t, lang } from './lib/i18n.svelte'
-  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, leave, loadSettings, checkUpdate, ACCENTS } from './lib/store.svelte'
+  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, leave, loadSettings, checkUpdate, ACCENTS, setView } from './lib/store.svelte'
 
   const win = getCurrentWindow()
   let dark = $state(true)
@@ -77,6 +77,7 @@
     { label: t('Changer de thème'), keys: [mod, t('Maj'), 'L'], run: toggleTheme },
     { label: t('Suivre le thème du système'), run: () => { app.theme = 'system'; applyTheme(); persist() } },
     { label: t('Changer de dossier de notes'), run: chooseVault },
+    { label: t('Changer de vue (rendu, source, côte à côte)'), keys: [mod, t('Maj'), 'M'], run: () => setView() },
     { label: t('Réglages'), keys: [mod, ','], run: () => (app.settings = true) },
   ])
 
@@ -93,7 +94,7 @@
       '\\': toggleSidebar,
       j: toggleAgent,
     }
-    const fn = e.shiftKey ? (k === 'l' ? toggleTheme : undefined) : map[k]
+    const fn = e.shiftKey ? ({ l: toggleTheme, m: () => setView() } as Record<string, () => void>)[k] : map[k]
     if (fn) {
       e.preventDefault()
       fn()

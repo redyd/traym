@@ -126,6 +126,7 @@ input, textarea {
 }
 .icon-btn:hover { background: var(--hover); color: var(--fg); }
 .icon-btn[aria-pressed='true'] { color: var(--orange); }
+.icon-btn:disabled { opacity: 0.35; pointer-events: none; }
 
 /* Floating layers (bits-ui portals them to <body>, floating-ui keeps them inside the window) */
 .tip {

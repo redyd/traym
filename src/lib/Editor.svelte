@@ -10,7 +10,7 @@
   import { openUrl } from '@tauri-apps/plugin-opener'
   import {
     Heading1, Heading2, Heading3, Bold, Italic, Strikethrough, Code, SquareCode, TextQuote, List, ListChecks,
-    Link, ExternalLink, Unlink, ListOrdered, Minus, Highlighter, Sigma, SquareSigma, Superscript, FileText, Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus, Scissors, Copy, ClipboardPaste, TextSelect, Pilcrow, ChevronRight,
+    Link, ExternalLink, Unlink, ListOrdered, Minus, Highlighter, Sigma, SquareSigma, Superscript, FileText, Table, Image, Grid2x2X, GripVertical, GripHorizontal, Plus, Scissors, Copy, ClipboardPaste, TextSelect, Pilcrow, ChevronRight, Eye, FileCode, Columns2, Undo2, Redo2,
   } from '@lucide/svelte'
   import TableIcon, { type TableOp } from './TableIcon.svelte'
   import { extensions, split, media, ui } from './schema'
@@ -18,7 +18,7 @@
   import 'katex/dist/katex.min.css'
   import Tip from './Tip.svelte'
   import { t as tr } from './i18n.svelte'
-  import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists, persist, flat, refresh } from './store.svelte'
+  import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists, persist, flat, refresh, setView, type View } from './store.svelte'
 
   let host: HTMLDivElement
   let scroller: HTMLDivElement
@@ -27,6 +27,9 @@
   let path: string | null = null
   let front = '' // frontmatter, kept verbatim outside the editor
   let saved = ''
+  let src = $state('') // the file as text, for the source view
+  let raw: string | null = null // set while the last edit came from the source view: saved verbatim, not re-serialized
+  let srcEl = $state<HTMLTextAreaElement>()
   let timer = 0
   let words = $state(0)
   let status = $state<'saved' | 'saving'>('saved')
@@ -437,7 +440,7 @@
   async function save() {
     clearTimeout(timer)
     if (!path || !editor) return
-    const md = text()
+    const md = raw ?? text()
     if (md === saved) return void (status = 'saved') // an update that changed nothing on disk (e.g. a node view settling)
     status = 'saving'
     await call('write_note', { path, content: md })
@@ -484,6 +487,8 @@
       onTransaction: () => {
         const a = tools.filter((t) => t?.active()).map((t) => t!.key)
         if (a.join() !== on.join()) on = a
+        const u = !!editor?.can().undo(), re = !!editor?.can().redo()
+        if (u !== can.undo || re !== can.redo) can = { undo: u, redo: re }
         lang = editor?.isActive('codeBlock') ? editor.getAttributes('codeBlock').language ?? '' : ''
         moveCaret()
       },
@@ -491,6 +496,8 @@
       onBlur: moveCaret,
       onUpdate: ({ editor: e }) => {
         words = count(e.getText())
+        raw = null
+        src = text()
         status = 'saving'
         clearTimeout(timer)
         timer = window.setTimeout(save, 400)
@@ -518,6 +525,8 @@
       return convertFileSrc(p.startsWith('/') ? p : `${base}/${p}`)
     }
     make(body)
+    src = disk
+    raw = null
     status = 'saved'
     scroller?.scrollTo({ top: 0 })
     host.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], {
@@ -527,7 +536,8 @@
     if (app.fresh === next) {
       app.fresh = null
       requestAnimationFrame(() => titleEl?.select())
-    } else editor!.commands.focus('start')
+    } else if (app.view === 'source') srcEl?.focus()
+    else editor!.commands.focus('start')
   }
 
   async function rename(input: HTMLInputElement) {
@@ -545,6 +555,41 @@
   $effect(() => {
     load(app.current)
   })
+
+  // a keystroke in the source view: the rendered side follows when shown, the text is saved as typed
+  function edit(v: string) {
+    raw = src = v
+    const [f, body] = split(v)
+    front = f
+    if (app.view === 'split') sync(body)
+    status = 'saving'
+    clearTimeout(timer)
+    timer = window.setTimeout(save, 400)
+  }
+  function sync(body: string) {
+    if (!editor) return
+    editor.commands.setContent(body, { contentType: 'markdown', emitUpdate: false })
+    words = count(editor.getText())
+  }
+  // back from the source view: the rendered side catches up with what was typed there
+  $effect(() => {
+    if (app.view !== 'source' && raw !== null) sync(split(raw)[1])
+  })
+  // undo / redo: the textarea's own history while it has the keyboard, else the editor's
+  let can = $state({ undo: false, redo: false })
+  const undoLabel = 'Annuler ({mod}+Z)', redoLabel = 'Rétablir ({mod}+Maj+Z)'
+  function history(redo: boolean) {
+    if (app.view === 'source' || document.activeElement === srcEl) {
+      srcEl?.focus()
+      document.execCommand(redo ? 'redo' : 'undo') // fires input, so edit() saves it
+    } else if (redo) cmd().redo().run()
+    else cmd().undo().run()
+  }
+  const views: { v: View; label: string; icon: typeof Eye }[] = [
+    { v: 'rich', label: 'Rendu', icon: Eye },
+    { v: 'source', label: 'Source Markdown', icon: FileCode },
+    { v: 'split', label: 'Côte à côte', icon: Columns2 },
+  ]
 
   onMount(() => {
     // no toolbar while the mouse is still dragging out a selection
@@ -574,12 +619,14 @@
       // background re-read: a failure (the note just moved or vanished) is not the user's concern
       const disk = await invoke<string>('read_note', { path }).catch(() => null)
       // only take the disk version when the user has nothing unsaved
-      if (disk === null || disk === saved || text() !== saved) return
+      if (disk === null || disk === saved || (raw ?? text()) !== saved) return
       const [f, body] = split(disk)
       front = f
       const at = editor.state.selection.from
       editor.chain().setContent(body, { contentType: 'markdown', emitUpdate: false }).setTextSelection(Math.min(at, editor.state.doc.content.size)).run()
       saved = text()
+      src = disk
+      raw = null
       words = count(editor.getText())
       status = 'saved'
       ember++
@@ -647,13 +694,26 @@
   {#if app.current}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="toolbar" role="toolbar" aria-label={tr('Mise en forme')} tabindex="-1" onmousedown={(e) => e.preventDefault()}>
-      {@render buttons(true)}
+      {#if app.view !== 'source'}{@render buttons(true)}{/if}
+      <div class="views">
+        <Tip class="icon-btn" disabled={app.view === 'rich' && !can.undo} label={tr(undoLabel, { mod })} onclick={() => history(false)}><Undo2 size={15} strokeWidth={1.6} /></Tip>
+        <Tip class="icon-btn" disabled={app.view === 'rich' && !can.redo} label={tr(redoLabel, { mod })} onclick={() => history(true)}><Redo2 size={15} strokeWidth={1.6} /></Tip>
+        <span class="sep"></span>
+        {#each views as { v, label, icon: I }}
+          <Tip class={app.view === v ? 'icon-btn on' : 'icon-btn'} aria-pressed={app.view === v} label={tr(label) + ` (${mod}+${tr('Maj')}+M)`} onclick={() => setView(v)}><I size={15} strokeWidth={1.6} /></Tip>
+        {/each}
+      </div>
     </div>
   {/if}
   {#key ember}
     {#if ember}<div class="ember"></div>{/if}
   {/key}
-  <div class="scroll" bind:this={scroller}>
+  <div class="panes">
+  {#if app.current && app.view !== 'rich'}
+    <textarea class="source" bind:this={srcEl} value={src} spellcheck="false" aria-label={tr('Source Markdown')}
+      oninput={(e) => edit(e.currentTarget.value)}></textarea>
+  {/if}
+  <div class="scroll" class:gone={app.view === 'source'} bind:this={scroller}>
     <div class="page" bind:this={page}>
     {#if app.current}
       <input
@@ -675,6 +735,9 @@
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content class="menu" collisionPadding={8} onCloseAutoFocus={(e) => { e.preventDefault(); editor?.commands.focus() }}>
+          <ContextMenu.Item disabled={!can.undo} onSelect={() => history(false)}><Undo2 size={14} strokeWidth={1.6} />{tr(undoLabel, { mod }).replace(/ \(.*/, '')}<kbd>{mod}+Z</kbd></ContextMenu.Item>
+          <ContextMenu.Item disabled={!can.redo} onSelect={() => history(true)}><Redo2 size={14} strokeWidth={1.6} />{tr(redoLabel, { mod }).replace(/ \(.*/, '')}<kbd>{mod}+{tr('Maj')}+Z</kbd></ContextMenu.Item>
+          <ContextMenu.Separator />
           <ContextMenu.Item disabled={!picked} onSelect={() => clip('cut')}><Scissors size={14} strokeWidth={1.6} />{tr('Couper')}<kbd>{mod}+X</kbd></ContextMenu.Item>
           <ContextMenu.Item disabled={!picked} onSelect={() => clip('copy')}><Copy size={14} strokeWidth={1.6} />{tr('Copier')}<kbd>{mod}+C</kbd></ContextMenu.Item>
           <ContextMenu.Item onSelect={pasteClip}><ClipboardPaste size={14} strokeWidth={1.6} />{tr('Coller')}<kbd>{mod}+V</kbd></ContextMenu.Item>
@@ -770,6 +833,7 @@
     {/if}
     </div>
   </div>
+  </div>
 
   <!-- shown, hidden and placed by the bubble menu extension -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -809,7 +873,22 @@
     overflow-y: auto;
     padding: 56px clamp(16px, 5%, 32px) 30vh;
   }
-  .empty .scroll { display: none; }
+  .empty .scroll, .scroll.gone { display: none; }
+  .panes { flex: 1; min-height: 0; display: flex; }
+  .scroll { min-width: 0; }
+  .source {
+    flex: 1;
+    min-width: 0;
+    resize: none;
+    border: 0;
+    outline: none;
+    padding: 32px clamp(16px, 4%, 32px) 30vh;
+    background: var(--bg);
+    color: var(--fg);
+    font: 13.5px/1.65 var(--mono);
+    tab-size: 2;
+  }
+  .source + .scroll { border-left: 1px solid var(--line-soft); }
 
   .title {
     display: block;
@@ -921,6 +1000,8 @@
   .toolbar > :global(:last-child) { margin-right: auto; }
   .toolbar :global(.icon-btn) { flex: none; }
   .toolbar .sep { flex: none; }
+  /* view switch pinned right (stays put when the mode hides the formatting buttons), visible when the bar scrolls */
+  .toolbar > .views.views { flex: none; display: flex; align-items: center; gap: 1px; margin: 0 0 0 auto; padding-left: 8px; position: sticky; right: 0; background: var(--bg); }
   .bar :global(.icon-btn), .toolbar :global(.icon-btn) { width: 28px; height: 28px; color: var(--muted); }
   .bar :global(.icon-btn.on), .toolbar :global(.icon-btn.on) { color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, transparent); }
   .bar .sep, .toolbar .sep { width: 1px; height: 16px; margin: 0 3px; background: var(--line-soft); }

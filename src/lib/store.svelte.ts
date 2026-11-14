@@ -41,6 +41,7 @@ export const app = $state({
   accent: ls.get('accent') ?? 'orange', // a preset name (see ACCENTS) or a #rrggbb colour
   toolbarAlign: (ls.get('toolbarAlign') ?? 'center') as 'center' | 'left',
   pageAlign: (ls.get('pageAlign') ?? 'center') as 'center' | 'left',
+  view: (['source', 'split'].includes(ls.get('view')!) ? ls.get('view') : 'rich') as View, // the editor: rendered, raw markdown, or both
   onClose: (['quit', 'commit', 'sync'].includes(ls.get('onClose')!) ? ls.get('onClose') : 'ask') as CloseAction,
   settings: false, // the Settings page replaces the main view while open
   sidebar: ls.get('sidebar') !== '0',
@@ -53,6 +54,10 @@ export const app = $state({
   closing: null as null | 'ask' | 'busy' | { error: string }, // the popup shown while quitting
   pushing: false, // that popup's work includes a push (else only a commit)
 })
+
+export type View = 'rich' | 'source' | 'split'
+export const VIEWS: View[] = ['rich', 'source', 'split']
+export const setView = (v: View = VIEWS[(VIEWS.indexOf(app.view) + 1) % 3]) => { app.view = v; persist() }
 
 // set by the editor so file moves never race a pending autosave
 export const hooks = { flush: async () => {} }
@@ -72,6 +77,7 @@ export function persist() {
   ls.set('accent', app.accent)
   ls.set('toolbarAlign', app.toolbarAlign)
   ls.set('pageAlign', app.pageAlign)
+  ls.set('view', app.view)
   ls.set('onClose', app.onClose)
   ls.set('lang', i18n.lang)
   ls.set('sidebar', app.sidebar ? '1' : '0')
