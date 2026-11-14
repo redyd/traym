@@ -11,7 +11,7 @@
   import Editor from './lib/Editor.svelte'
   import AgentPanel from './lib/AgentPanel.svelte'
   import { t, lang } from './lib/i18n.svelte'
-  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, leave, loadSettings, ACCENTS } from './lib/store.svelte'
+  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, leave, loadSettings, checkUpdate, ACCENTS } from './lib/store.svelte'
 
   const win = getCurrentWindow()
   let dark = $state(true)
@@ -122,6 +122,7 @@
           boot?.classList.add('gone')
           setTimeout(() => boot?.remove(), 300)
         }))
+        checkUpdate()
       })
   })
 

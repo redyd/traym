@@ -17,6 +17,9 @@ export function t(fr: string, vars: Record<string, string | number> = {}) {
 
 const en: Record<string, string> = {
   // app shell
+  'traym {v} est disponible': 'traym {v} is available',
+  'Installer et redémarrer': 'Install and restart',
+  'Mise à jour…': 'Updating…',
   'Ouvrir un autre dossier': 'Open another folder',
   'Barre latérale ({mod}+\\)': 'Sidebar ({mod}+\\)',
   'Thème clair ({mod}+Maj+L)': 'Light theme ({mod}+Shift+L)',

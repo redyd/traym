@@ -1,8 +1,11 @@
+/// <reference types="vite/client" />
 import { invoke, type InvokeArgs, type InvokeOptions } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { SvelteSet } from 'svelte/reactivity'
 import { toast } from 'svelte-sonner'
+import { check } from '@tauri-apps/plugin-updater'
+import { relaunch } from '@tauri-apps/plugin-process'
 import { t, i18n } from './i18n.svelte'
 
 export type Node = { name: string; path: string; dir: boolean; children: Node[] }
@@ -263,4 +266,29 @@ export async function loadSettings() {
 
 export async function saveSettings(s: BackendSettings) {
   backend.settings = await call<BackendSettings>('settings_set', { settings: s })
+}
+
+// a newer release on GitHub (see tauri.conf.json's updater): offered in a toast, installed on demand.
+// Notes are saved on disk before the restart; uncommitted changes simply stay uncommitted.
+export async function checkUpdate() {
+  if (!import.meta.env.PROD) return
+  const u = await check().catch(() => null)
+  if (!u) return
+  toast(t('traym {v} est disponible', { v: u.version }), {
+    duration: Infinity,
+    action: {
+      label: t('Installer et redémarrer'),
+      onClick: async () => {
+        const id = toast.loading(t('Mise à jour…'))
+        try {
+          await hooks.flush()
+          await u.downloadAndInstall()
+          await relaunch()
+        } catch (e) {
+          toast.dismiss(id)
+          flash(String(e))
+        }
+      },
+    },
+  })
 }

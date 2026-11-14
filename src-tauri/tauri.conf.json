@@ -56,8 +56,15 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdBRUIyNENDMDI0OTIzMTQKUldRVUkwa0N6Q1RyZWxaQXp2d2p6ZlZPeWU2RGh0eXpKT0dRUGtlR25obFR2Q3RndDhFR3BJNk8K",
+      "endpoints": ["https://github.com/redyd/traym/releases/latest/download/latest.json"]
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",

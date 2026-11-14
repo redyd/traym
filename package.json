@@ -16,6 +16,8 @@
     "@lucide/svelte": "^1.72.0",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "@tiptap/core": "^3.34.0",
     "@tiptap/extension-bubble-menu": "^3.34.0",
     "@tiptap/extension-file-handler": "^3.34.0",

@@ -261,6 +261,8 @@ async fn agent_stop(core: C<'_>) -> Res<()> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let (listener, url) = tauri::async_runtime::block_on(mcp::bind());
             let settings_path = app.path().app_config_dir()?.join("settings.json");
