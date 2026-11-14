@@ -191,8 +191,17 @@ export async function newFolder(dir = '') {
   app.renaming = path
 }
 
-export async function move(from: string, to: string) {
-  if (from === to) return
+// one move at a time, each against the tree the previous one left: a drop that fires twice, or a drag that
+// started on a row a rename was already moving, finds its source gone and is skipped instead of failing (ENOENT)
+let moving = Promise.resolve()
+export function move(from: string, to: string) {
+  const run = moving.then(() => moveNow(from, to))
+  moving = run.catch(() => {})
+  return run
+}
+
+async function moveNow(from: string, to: string) {
+  if (from === to || !exists(from)) return
   await hooks.flush()
   await call('move_path', { from, to })
   // keep the editor and expanded folders pointing at the moved paths
