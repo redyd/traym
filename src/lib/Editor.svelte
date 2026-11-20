@@ -363,19 +363,38 @@
     ;(pos == null ? cmd().insertContent(nodes) : cmd().insertContentAt(pos, nodes)).run()
   }
 
-  /** Embed image files from disk: one already in the vault is linked, one from outside is copied next to the note first. */
+  /** Embed image files from disk: copied into the vault's `.ressources` first, unless already there. */
   async function embedPaths(files: string[], pos?: number) {
     const note = path
     if (!note || !app.vault) return
+    const res = `${app.vault}/.ressources/`
     const rels: string[] = []
     for (const f of files)
-      rels.push(f.startsWith(app.vault + '/') ? f.slice(app.vault.length + 1) : await call<string>('import_file', { src: f, dir: parent(note) }))
+      rels.push(f.startsWith(res) ? f.slice(app.vault.length + 1) : await call<string>('import_file', { src: f }))
     embed(note, rels, pos)
   }
 
   async function image() {
     const file = await open({ filters: [{ name: 'Images', extensions: IMAGES }] })
     if (typeof file === 'string') embedPaths([file])
+  }
+
+  /** Double click in the blank under a block: caret on the line after it. Under an image (a table, a formula…),
+   *  which takes no text, that line is added if there is no empty one already. */
+  function below(e: MouseEvent) {
+    if (!editor || ![scroller, page, editor.view.dom].includes(e.target as HTMLElement)) return // a click in the text keeps its word selection
+    const { view, state } = editor
+    let after = -1
+    state.doc.forEach((n, pos) => {
+      const r = (view.nodeDOM(pos) as Element | null)?.getBoundingClientRect()
+      if (r && r.bottom <= e.clientY) after = pos + n.nodeSize
+    })
+    if (after < 0) return
+    const prev = state.doc.resolve(after).nodeBefore!, next = state.doc.nodeAt(after)
+    const c = editor.chain().focus()
+    if (prev.isTextblock) return void c.setTextSelection(after - 1).run()
+    if (!(next?.type.name === 'paragraph' && !next.content.size)) c.insertContentAt(after, { type: 'paragraph' })
+    c.setTextSelection(after + 1).run()
   }
 
   /** WebKitGTK hands over files copied or dragged from the file manager as file:// URIs, not as files. */
@@ -385,17 +404,16 @@
     return uris.map((u) => decodeURIComponent(new URL(u).pathname)).filter((p) => IMAGES.includes(p.split('.').pop()!.toLowerCase()))
   }
 
-  /** Pasted or dropped images: written next to the note, then embedded where they landed. */
+  /** Pasted or dropped images: written to the vault's `.ressources`, then embedded where they landed. */
   async function drop(files: File[], pos?: number) {
     const note = path
     if (!note) return
-    const dir = parent(note)
     const rels: string[] = []
     for (const f of files) {
       // a pasted screenshot has no real name
       const name = f.name && f.name !== 'image.png' ? f.name : `image-${new Date().toISOString().slice(0, 19).replace(/\D/g, '')}.${f.type.split('/')[1]?.replace('svg+xml', 'svg') ?? 'png'}`
       rels.push(await call<string>('save_file', new Uint8Array(await f.arrayBuffer()), {
-        headers: { 'x-dir': encodeURIComponent(dir), 'x-name': encodeURIComponent(name) },
+        headers: { 'x-name': encodeURIComponent(name) },
       }))
     }
     embed(note, rels, pos)
@@ -522,7 +540,12 @@
       if (/^[a-z][\w+.-]*:/i.test(src)) return src
       let p = src
       try { p = decodeURI(src) } catch {}
-      return convertFileSrc(p.startsWith('/') ? p : `${base}/${p}`)
+      // the asset protocol refuses any path with `..` in it (`../../.ressources/x.png`): resolve them here
+      const parts: string[] = []
+      for (const s of (p.startsWith('/') ? p : `${base}/${p}`).split('/'))
+        if (s === '..') parts.pop()
+        else if (s && s !== '.') parts.push(s)
+      return convertFileSrc('/' + parts.join('/'))
     }
     make(body)
     src = disk
@@ -715,7 +738,7 @@
     <textarea class="source" bind:this={srcEl} value={src} spellcheck="false" aria-label={tr('Source Markdown')}
       oninput={(e) => edit(e.currentTarget.value)}></textarea>
   {/if}
-  <div class="scroll" class:gone={app.view === 'source'} bind:this={scroller}>
+  <div class="scroll" class:gone={app.view === 'source'} bind:this={scroller} role="presentation" ondblclick={below}>
     <div class="page" bind:this={page}>
     {#if app.current}
       <input

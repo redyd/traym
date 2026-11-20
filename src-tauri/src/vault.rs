@@ -44,6 +44,9 @@ pub fn md(rel: &str) -> String {
     if rel.ends_with(".md") { rel.to_string() } else { format!("{rel}.md") }
 }
 
+/// Where embedded images are copied: hidden from the tree, committed with the notes.
+pub const RESOURCES: &str = ".ressources";
+
 fn hidden(name: &str) -> bool {
     name.starts_with('.')
 }

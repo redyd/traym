@@ -48,12 +48,13 @@ async fn conflicts(root: &Path) -> Res<Vec<String>> {
     Ok(git(root, &["diff", "--name-only", "--diff-filter=U"]).await?.lines().map(str::to_string).collect())
 }
 
-/// Only notes are the app's business: other files in the vault are left for the user to commit (or not).
-const NOTES: &str = "*.md"; // a git pathspec: matches in every folder
+/// Only notes and their images are the app's business: other files in the vault are left for the user
+/// to commit (or not). Git pathspecs: `*.md` matches in every folder.
+const SYNCED: [&str; 2] = ["*.md", vault::RESOURCES];
 
-/// Notes added, edited, moved or deleted since the last commit, one per line.
-async fn note_changes(root: &Path) -> Res<String> {
-    git(root, &["status", "--porcelain", "-uall", "--", NOTES]).await
+/// Files under `specs` added, edited, moved or deleted since the last commit, one per line.
+async fn changes(root: &Path, specs: &[&str]) -> Res<String> {
+    git(root, &[&["status", "--porcelain", "-uall", "--"], specs].concat()).await
 }
 
 /// None when the vault is not a git repository.
@@ -61,7 +62,7 @@ pub async fn status(root: &Path) -> Res<Option<Status>> {
     if git(root, &["rev-parse", "--is-inside-work-tree"]).await.is_err() {
         return Ok(None);
     }
-    let changes = note_changes(root).await?.lines().count();
+    let changes = changes(root, &SYNCED).await?.lines().count();
     let remote = match remote(root).await? {
         Some(r) => Some(git(root, &["remote", "get-url", &r]).await?.trim().to_string()),
         None => None,
@@ -96,9 +97,15 @@ pub async fn commit(root: &Path, message: &str) -> Res<()> {
     if !conflicts(root).await?.is_empty() {
         return Err("conflicts need resolving".into());
     }
-    // no change, no add: `add` fails on a pathspec that matches nothing (a vault without any note)
-    if !note_changes(root).await?.is_empty() {
-        git(root, &["add", "-A", "--", NOTES]).await?;
+    // no change, no add: `add` fails on a pathspec that matches nothing (no note, no `.ressources`)
+    let mut any = false;
+    for spec in SYNCED {
+        if !changes(root, &[spec]).await?.is_empty() {
+            git(root, &["add", "-A", "--", spec]).await?;
+            any = true;
+        }
+    }
+    if any {
         git(root, &["commit", "-m", message]).await?;
     }
     Ok(())
@@ -184,6 +191,12 @@ mod tests {
         sync(root, true, "  ma note  ").await.unwrap();
         assert_eq!(git(root, &["ls-files"]).await.unwrap(), "New folder/a.md\n");
         assert_eq!(git(root, &["log", "-1", "--format=%s"]).await.unwrap(), "ma note\n");
+        std::fs::create_dir(root.join(vault::RESOURCES)).unwrap();
+        std::fs::write(root.join(".ressources/x.png"), "x").unwrap(); // an embedded image: committed alone
+        assert_eq!(status(root).await.unwrap().unwrap().changes, 1);
+        sync(root, true, "").await.unwrap();
+        assert_eq!(git(root, &["ls-files"]).await.unwrap(), ".ressources/x.png\nNew folder/a.md\n");
+        std::fs::remove_dir_all(root.join(vault::RESOURCES)).unwrap();
         std::fs::remove_file(root.join("New folder/a.md")).unwrap();
         sync(root, true, "").await.unwrap(); // a deleted note is committed too
         assert_eq!(git(root, &["ls-files"]).await.unwrap(), "");

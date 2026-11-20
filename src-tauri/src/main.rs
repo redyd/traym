@@ -78,23 +78,28 @@ fn open_vault(core: C, path: String) -> Res<Vec<Node>> {
     w.watch(&root, RecursiveMode::Recursive).map_err(|e| e.to_string())?;
     *core.watcher.lock().unwrap() = Some(w);
     // the webview may show images from this vault (and only this one) through the asset protocol
-    core.app.asset_protocol_scope().allow_directory(&root, true).map_err(|e| e.to_string())?;
+    // (`.ressources` by name: a scope never matches hidden folders on its own)
+    let scope = core.app.asset_protocol_scope();
+    scope.allow_directory(&root, true).map_err(|e| e.to_string())?;
+    scope.allow_directory(root.join(vault::RESOURCES), true).map_err(|e| e.to_string())?;
     *core.vault.write().unwrap() = Some(root);
     Ok(tree)
 }
 
-/// Where a new file named `file` goes in `dir` (vault-relative), next to the note that embeds it:
-/// renamed `name-1.ext`… if the name is taken. Returns its vault-relative and absolute paths.
-fn free_path(root: &std::path::Path, dir: &str, file: &str) -> Res<(String, PathBuf)> {
+/// Where a new image named `file` goes: the vault's hidden `.ressources` folder (out of the tree,
+/// in git), renamed `name-1.ext`… if the name is taken. Returns its vault-relative and absolute paths.
+/// `file` is a bare name (see `image_name`), so it cannot climb out of that folder.
+fn free_path(root: &std::path::Path, file: &str) -> Res<(String, PathBuf)> {
+    let dir = root.join(vault::RESOURCES);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file = std::path::Path::new(file);
     let stem = file.file_stem().ok_or("invalid file")?.to_string_lossy().to_string();
     let ext = file.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
     for i in 0.. {
         let name = if i == 0 { format!("{stem}{ext}") } else { format!("{stem}-{i}{ext}") };
-        let rel = if dir.is_empty() { name } else { format!("{dir}/{name}") };
-        let to = vault::resolve(root, &rel)?;
+        let to = dir.join(&name);
         if !to.exists() {
-            return Ok((rel, to));
+            return Ok((format!("{}/{name}", vault::RESOURCES), to));
         }
     }
     unreachable!()
@@ -110,25 +115,24 @@ fn image_name(name: &str) -> Res<String> {
     if IMAGES.contains(&ext.as_str()) { Ok(file) } else { Err(format!("not an image: {file}")) }
 }
 
-/// Copy an image picked outside the vault into `dir`. Returns its vault-relative path.
+/// Copy an image picked on disk into `.ressources`. Returns its vault-relative path.
 #[tauri::command]
-fn import_file(core: C, src: String, dir: String) -> Res<String> {
+fn import_file(core: C, src: String) -> Res<String> {
     let from = PathBuf::from(&src);
     let name = image_name(&from.to_string_lossy())?;
-    let (rel, to) = free_path(&core.vault()?, &dir, &name)?;
+    let (rel, to) = free_path(&core.vault()?, &name)?;
     std::fs::copy(&from, &to).map_err(|e| e.to_string())?;
     Ok(rel)
 }
 
-/// Write a pasted or dropped file into `dir`. The bytes come as the raw request body (no JSON),
-/// `x-dir` and `x-name` as URI-encoded headers. Returns its vault-relative path.
+/// Write a pasted or dropped file into `.ressources`. The bytes come as the raw request body (no JSON),
+/// `x-name` as a URI-encoded header. Returns its vault-relative path.
 #[tauri::command]
 fn save_file(core: C, request: tauri::ipc::Request) -> Res<String> {
     let tauri::ipc::InvokeBody::Raw(data) = request.body() else { return Err("invalid content".into()) };
     let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(uri_decode).ok_or(format!("missing header {k}"));
-    // a bare image name: never a path that could climb out of `dir`
     let name = image_name(&header("x-name")?)?;
-    let (rel, to) = free_path(&core.vault()?, &header("x-dir")?, &name)?;
+    let (rel, to) = free_path(&core.vault()?, &name)?;
     std::fs::write(&to, data).map_err(|e| e.to_string())?;
     Ok(rel)
 }
