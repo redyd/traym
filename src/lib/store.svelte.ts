@@ -32,6 +32,7 @@ export const app = $state({
   vault: ls.get('vault') as string | null,
   tree: [] as Node[],
   current: null as string | null,
+  selected: null as string | null, // last item clicked in the tree (file or folder): where new notes / folders go
   open: new SvelteSet<string>(JSON.parse(ls.get('open') ?? '[]')),
   pulse: new SvelteSet<string>(),
   renaming: null as string | null,
@@ -94,6 +95,7 @@ export async function openVault(path: string) {
   app.vault = path
   const last = ls.get('current')
   app.current = last && flat().includes(last) ? last : null
+  app.selected = app.current
   persist()
   await gitStatus()
   await pull(true) // at startup this runs under index.html's boot screen
@@ -185,22 +187,32 @@ function unique(dir: string, base: string, ext: string) {
   return join(dir, name)
 }
 
-export async function newNote(dir = app.current ? parent(app.current) : '') {
+// the selected folder, or the selected file's folder; nothing selected = vault root
+export const here = () => (find(app.selected ?? '')?.dir ? app.selected! : parent(app.selected ?? ''))
+
+function find(path: string, nodes = app.tree): Node | undefined {
+  for (const n of nodes) {
+    const hit = n.path === path ? n : n.dir ? find(path, n.children) : undefined
+    if (hit) return hit
+  }
+}
+
+export async function newNote(dir = here()) {
   const path = unique(dir, t('Sans titre'), '.md')
   await call('create_note', { path })
   if (dir) app.open.add(dir)
   await refresh()
   app.fresh = path
-  app.current = path
+  app.current = app.selected = path
   persist()
 }
 
-export async function newFolder(dir = '') {
+export async function newFolder(dir = here()) {
   const path = unique(dir, t('Nouveau dossier'), '')
   await call('create_folder', { path })
   if (dir) app.open.add(dir)
   await refresh()
-  app.renaming = path
+  app.selected = app.renaming = path
 }
 
 // one move at a time, each against the tree the previous one left: a drop that fires twice, or a drag that
@@ -219,6 +231,7 @@ async function moveNow(from: string, to: string) {
   // keep the editor and expanded folders pointing at the moved paths
   const remap = (p: string) => (p === from || p.startsWith(from + '/') ? to + p.slice(from.length) : p)
   if (app.current) app.current = remap(app.current)
+  if (app.selected) app.selected = remap(app.selected)
   app.open = new SvelteSet([...app.open].map(remap))
   await refresh()
   persist()
@@ -227,7 +240,9 @@ async function moveNow(from: string, to: string) {
 export async function trash(path: string) {
   await hooks.flush()
   await call('trash_path', { path })
-  if (app.current && (app.current === path || app.current.startsWith(path + '/'))) app.current = null
+  const gone = (p: string | null) => p && (p === path || p.startsWith(path + '/'))
+  if (gone(app.current)) app.current = null
+  if (gone(app.selected)) app.selected = parent(path) || null
   await refresh()
 }
 

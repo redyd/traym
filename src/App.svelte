@@ -70,7 +70,7 @@
   const toggleSettings = () => (app.settings = !app.settings)
   const commands = $derived([
     { label: t('Nouvelle note'), keys: [mod, 'N'], run: () => newNote() },
-    { label: t('Nouveau dossier'), run: () => newFolder(app.current ? parent(app.current) : '') },
+    { label: t('Nouveau dossier'), run: () => newFolder() },
     { label: t('Ouvrir une note'), keys: [mod, 'P'], run: () => setTimeout(() => (app.palette = 'files')) },
     { label: t('Afficher ou masquer la barre latérale'), keys: [mod, '\\'], run: toggleSidebar },
     { label: t("Afficher ou masquer l'agent"), keys: [mod, 'J'], run: toggleAgent },

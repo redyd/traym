@@ -4,7 +4,7 @@
   import Tree from './Tree.svelte'
   import Tip from './Tip.svelte'
   import { t } from './i18n.svelte'
-  import { app, newNote, newFolder, trash, move, exists, flash, persist, sync, gitInit, setRemote, type Node } from './store.svelte'
+  import { app, newNote, newFolder, trash, move, exists, flash, persist, sync, gitInit, setRemote, isMac, type Node } from './store.svelte'
 
   let node = $state<Node | null>(null) // what the context menu acts on: the item right-clicked, or the vault root
   let over = $state(false)
@@ -29,6 +29,18 @@
   }
 
   const onmenu = (_e: MouseEvent, n: Node | null) => (node = n)
+
+  // a note opened elsewhere (palette, link, new note) becomes the selection too
+  $effect(() => {
+    if (app.current) app.selected = app.current
+  })
+
+  // Delete (⌘⌫ on mac) while the tree has focus: the selection goes to the trash
+  function treeKey(e: KeyboardEvent) {
+    if (!app.selected || !(e.key === 'Delete' || (isMac && e.metaKey && e.key === 'Backspace'))) return
+    e.preventDefault()
+    trash(app.selected)
+  }
 
   const dirOf = (n: Node | null) => (n ? (n.dir ? n.path : n.path.split('/').slice(0, -1).join('/')) : '')
 
@@ -62,6 +74,8 @@
     role="tree"
     tabindex="-1"
     oncontextmenucapture={() => (node = null)}
+    onclick={(e) => e.target === e.currentTarget && (app.selected = null)}
+    onkeydown={treeKey}
     ondragover={(e) => { e.preventDefault(); over = true }}
     ondragleave={() => (over = false)}
     ondrop={dropRoot}

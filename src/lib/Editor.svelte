@@ -536,6 +536,8 @@
     if (app.fresh === next) {
       app.fresh = null
       requestAnimationFrame(() => titleEl?.select())
+    } else if (document.activeElement?.closest('[role=tree]')) {
+      // opened from the sidebar: focus stays there, so Delete / arrows act on the tree
     } else if (app.view === 'source') srcEl?.focus()
     else editor!.commands.focus('start')
   }

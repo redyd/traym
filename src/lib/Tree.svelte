@@ -8,6 +8,7 @@
   let over = $state<string | null>(null)
 
   function click(n: Node) {
+    app.selected = n.path
     if (n.dir) {
       app.open.has(n.path) ? app.open.delete(n.path) : app.open.add(n.path)
     } else {
@@ -52,6 +53,7 @@
   <div
     class="row"
     class:active={app.current === n.path}
+    class:selected={app.selected === n.path}
     class:over={over === n.path}
     class:pulse={app.pulse.has(n.path)}
     style:--depth={depth}
@@ -123,6 +125,7 @@
     color: var(--fg);
   }
   .row.active .name { font-weight: 600; }
+  .row.selected:not(.active) { box-shadow: inset 0 0 0 1px var(--line); color: var(--fg); }
   .row.over { background: var(--orange-wash); box-shadow: inset 0 0 0 1px var(--orange); }
   .row.pulse { animation: pulse 1.6s var(--ease); }
   @keyframes pulse {
