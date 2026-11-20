@@ -16,6 +16,9 @@ export function t(fr: string, vars: Record<string, string | number> = {}) {
 }
 
 const en: Record<string, string> = {
+  // other files of the vault
+  'Aperçu indisponible pour ce fichier': 'No preview for this file',
+  "Ouvrir avec l'application par défaut": 'Open with the default app',
   // app shell
   'Lien ({mod}+L)': 'Link ({mod}+L)',
   'Surligner ({mod}+Maj+H)': 'Highlight ({mod}+Shift+H)',

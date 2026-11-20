@@ -1,8 +1,8 @@
 <script lang="ts">
   import { t } from './i18n.svelte'
-  import { ChevronRight, Folder, FolderOpen } from '@lucide/svelte'
+  import { ChevronRight, Folder, FolderOpen, FileText, FileImage, File } from '@lucide/svelte'
   import Tree from './Tree.svelte'
-  import { app, move, join, parent, title, exists, flash, persist, type Node } from './store.svelte'
+  import { app, move, join, parent, title, exists, flash, persist, isNote, isImage, type Node } from './store.svelte'
 
   let { nodes, depth = 0, onmenu }: { nodes: Node[]; depth?: number; onmenu: (e: MouseEvent, n: Node | null) => void } = $props()
   let over = $state<string | null>(null)
@@ -22,7 +22,7 @@
     app.renaming = null
     const name = input.value.trim().replace(/[\\/]/g, '-')
     if (!name) return
-    const to = join(parent(n.path), n.dir ? name : name + '.md')
+    const to = join(parent(n.path), n.dir || !isNote(n.path) ? name : name + '.md')
     if (to === n.path) return
     if (exists(to)) return flash(t('« {name} » existe déjà ici', { name }))
     await move(n.path, to)
@@ -56,6 +56,7 @@
     class:selected={app.selected === n.path}
     class:over={over === n.path}
     class:pulse={app.pulse.has(n.path)}
+    class:other={!n.dir && !isNote(n.path)}
     style:--depth={depth}
     role="treeitem"
     aria-selected={app.current === n.path}
@@ -78,6 +79,9 @@
       </span>
     {:else}
       <span class="chev"></span>
+      <span class="glyph" class:note={isNote(n.path)}>
+        {#if isNote(n.path)}<FileText size={14} strokeWidth={1.5} />{:else if isImage(n.path)}<FileImage size={14} strokeWidth={1.5} />{:else}<File size={14} strokeWidth={1.5} />{/if}
+      </span>
     {/if}
     {#if app.renaming === n.path}
       <input
@@ -143,6 +147,9 @@
   }
   .chev.open { transform: rotate(90deg); }
   .glyph { display: grid; color: var(--faint); margin-right: 3px; }
+  /* notes are the vault's main files: their icon carries the ink, other files stay a step back */
+  .glyph.note { color: var(--muted); }
+  .row.other:not(.active) .name { color: var(--faint); }
   .name {
     overflow: hidden;
     text-overflow: ellipsis;

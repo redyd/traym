@@ -18,7 +18,7 @@
   import 'katex/dist/katex.min.css'
   import Tip from './Tip.svelte'
   import { t as tr } from './i18n.svelte'
-  import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists, persist, flat, refresh, setView, type View } from './store.svelte'
+  import { app, call, hooks, onDiskChange, title, mod, move, parent, join, flash, exists, persist, flat, refresh, setView, isNote, isImage, diskPaths, IMAGES, type View } from './store.svelte'
 
   let host: HTMLDivElement
   let scroller: HTMLDivElement
@@ -261,11 +261,11 @@
   const noExt = (p: string) => p.replace(/\.md$/, '')
   function wikiTarget(p: string) {
     const base = noExt(p.split('/').pop()!)
-    return flat().filter((q) => noExt(q.split('/').pop()!) === base).length > 1 ? noExt(p) : base
+    return flat().filter(isNote).filter((q) => noExt(q.split('/').pop()!) === base).length > 1 ? noExt(p) : base
   }
   function resolveWiki(target: string) {
     const t = target.split('#')[0].trim().replace(/\.md$/, '')
-    const all = flat(), here = parent(path ?? '')
+    const all = flat().filter(isNote), here = parent(path ?? '')
     return all.find((p) => noExt(p) === t) ?? all.filter((p) => noExt(p).endsWith('/' + t) || noExt(p) === t).sort((a, b) => Number(parent(b) === here) - Number(parent(a) === here))[0]
   }
   async function openWiki(target: string) {
@@ -297,7 +297,7 @@
         allowedPrefixes: null,
         items: ({ query }) => {
           const q = query.toLowerCase()
-          return flat().filter((p) => p !== path && p.toLowerCase().includes(q)).slice(0, 8)
+          return flat().filter((p) => isNote(p) && p !== path && p.toLowerCase().includes(q)).slice(0, 8)
         },
         command: ({ editor: e, range, props }) => {
           e.chain().focus().insertContentAt(range, [{ type: 'wikiLink', attrs: { target: wikiTarget(props) } }, { type: 'text', text: ' ' }]).run()
@@ -354,7 +354,6 @@
     return [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/')
   }
 
-  const IMAGES = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif']
   /** Embed vault files `rels` in `note` (if still the open one), at `pos` or the caret. */
   function embed(note: string, rels: string[], pos?: number) {
     if (note !== path || !rels.length) return // the user moved to another note meanwhile
@@ -397,12 +396,7 @@
     c.setTextSelection(after + 1).run()
   }
 
-  /** WebKitGTK hands over files copied or dragged from the file manager as file:// URIs, not as files. */
-  function imagePaths(dt: DataTransfer | null) {
-    const uris = (dt?.getData('text/uri-list') || dt?.getData('text/plain') || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-    if (!uris.length || !uris.every((u) => u.startsWith('file://'))) return []
-    return uris.map((u) => decodeURIComponent(new URL(u).pathname)).filter((p) => IMAGES.includes(p.split('.').pop()!.toLowerCase()))
-  }
+  const imagePaths = (dt: DataTransfer | null) => diskPaths(dt).filter(isImage)
 
   /** Pasted or dropped images: written to the vault's `.ressources`, then embedded where they landed. */
   async function drop(files: File[], pos?: number) {

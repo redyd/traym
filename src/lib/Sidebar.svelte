@@ -4,7 +4,7 @@
   import Tree from './Tree.svelte'
   import Tip from './Tip.svelte'
   import { t } from './i18n.svelte'
-  import { app, newNote, newFolder, trash, move, exists, flash, persist, sync, gitInit, setRemote, isMac, type Node } from './store.svelte'
+  import { app, newNote, newFolder, trash, move, exists, flash, persist, sync, gitInit, setRemote, isMac, importFiles, here, type Node } from './store.svelte'
 
   let node = $state<Node | null>(null) // what the context menu acts on: the item right-clicked, or the vault root
   let over = $state(false)
@@ -76,6 +76,7 @@
     oncontextmenucapture={() => (node = null)}
     onclick={(e) => e.target === e.currentTarget && (app.selected = null)}
     onkeydown={treeKey}
+    onpaste={(e) => importFiles(e.clipboardData, here()).catch(() => {})}
     ondragover={(e) => { e.preventDefault(); over = true }}
     ondragleave={() => (over = false)}
     ondrop={dropRoot}

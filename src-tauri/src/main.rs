@@ -63,11 +63,11 @@ fn open_vault(core: C, path: String) -> Res<Vec<Node>> {
                 return;
             }
             // with whether each still exists, so the UI can tell an edit (no tree refresh) from a
-            // create / delete / rename. Other files (images, downloads…) are none of the tree's business.
+            // create / delete / rename. `.git` is none of the tree's business.
             let paths: Vec<Value> = e.paths.iter()
-                .filter_map(|p| Some((p.strip_prefix(&base).ok()?.to_string_lossy().to_string(), p.exists(), p.is_dir())))
-                .filter(|(p, exists, dir)| !p.split('/').any(|c| c.starts_with('.')) && (p.ends_with(".md") || *dir || !exists))
-                .map(|(path, exists, _)| json!({ "path": path, "exists": exists }))
+                .filter_map(|p| Some((p.strip_prefix(&base).ok()?.to_string_lossy().to_string(), p.exists())))
+                .filter(|(p, _)| !p.split('/').any(vault::hidden))
+                .map(|(path, exists)| json!({ "path": path, "exists": exists }))
                 .collect();
             if !paths.is_empty() {
                 let _ = app.emit("vault://changed", paths);
@@ -86,8 +86,7 @@ fn open_vault(core: C, path: String) -> Res<Vec<Node>> {
     Ok(tree)
 }
 
-/// Where a new image named `file` goes: the vault's hidden `.ressources` folder (out of the tree,
-/// in git), renamed `name-1.ext`… if the name is taken. Returns its vault-relative and absolute paths.
+/// Where a new image named `file` goes: the vault's `.ressources` folder (in git), renamed `name-1.ext`… if the name is taken. Returns its vault-relative and absolute paths.
 /// `file` is a bare name (see `image_name`), so it cannot climb out of that folder.
 fn free_path(root: &std::path::Path, file: &str) -> Res<(String, PathBuf)> {
     let dir = root.join(vault::RESOURCES);
@@ -165,6 +164,31 @@ fn read_note(core: C, path: String) -> Res<String> {
 #[tauri::command]
 fn write_note(core: C, path: String, content: String) -> Res<()> {
     vault::write(&core.vault()?, &path, &content)
+}
+
+#[tauri::command]
+fn read_file(core: C, path: String) -> Res<String> {
+    vault::read_text(&core.vault()?, &path)
+}
+
+#[tauri::command]
+fn write_file(core: C, path: String, content: String) -> Res<()> {
+    vault::write_text(&core.vault()?, &path, &content)
+}
+
+/// Files copied in the system's file manager and pasted on the tree, copied into `dir`. Returns their vault paths.
+#[tauri::command]
+fn import_files(core: C, srcs: Vec<String>, dir: String) -> Res<Vec<String>> {
+    let root = core.vault()?;
+    srcs.iter().map(|s| vault::import(&root, std::path::Path::new(s), &dir)).collect()
+}
+
+/// A file the app can't show, handed to the system's default app for it.
+#[tauri::command]
+fn open_external(core: C, path: String) -> Res<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let p = vault::resolve(&core.vault()?, &path)?;
+    core.app.opener().open_path(p.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -293,7 +317,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            open_vault, import_file, save_file, tree, read_note, write_note, create_note, create_folder, move_path, trash_path, git_status, git_init, git_sync, git_set_remote, git_pull, git_resolve, git_abort, agent_send, agent_stop, agent_models, agent_available, settings_get, settings_set
+            open_vault, import_file, save_file, tree, read_note, write_note, read_file, write_file, open_external, import_files, create_note, create_folder, move_path, trash_path, git_status, git_init, git_sync, git_set_remote, git_pull, git_resolve, git_abort, agent_send, agent_stop, agent_models, agent_available, settings_get, settings_set
         ])
         .run(tauri::generate_context!())
         .expect("error while starting traym");

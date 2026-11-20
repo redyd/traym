@@ -105,7 +105,7 @@ pub fn tools() -> Value {
     let path = json!({ "type": "string", "description": "Path relative to the vault, e.g. Projects/ideas.md" });
     let obj = |props: Value, req: &[&str]| json!({ "type": "object", "properties": props, "required": req });
     json!([
-        { "name": "list_notes", "description": "Lists the tree of notes and folders in the vault.", "inputSchema": obj(json!({}), &[]) },
+        { "name": "list_notes", "description": "Lists the tree of files and folders in the vault (notes are the .md files).", "inputSchema": obj(json!({}), &[]) },
         { "name": "read_note", "description": "Reads the markdown content of a note.", "inputSchema": obj(json!({ "path": path }), &["path"]) },
         { "name": "write_note", "description": "Creates or fully replaces a note.", "inputSchema": obj(json!({ "path": path, "content": { "type": "string" } }), &["path", "content"]) },
         { "name": "create_note", "description": "Creates a new note (fails if it exists).", "inputSchema": obj(json!({ "path": path, "content": { "type": "string" } }), &["path"]) },

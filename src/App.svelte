@@ -9,9 +9,10 @@
   import Tip from './lib/Tip.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import Editor from './lib/Editor.svelte'
+  import FileView from './lib/FileView.svelte'
   import AgentPanel from './lib/AgentPanel.svelte'
   import { t, lang } from './lib/i18n.svelte'
-  import { app, openVault, newNote, newFolder, persist, parent, title, mod, quit, leave, loadSettings, checkUpdate, ACCENTS, setView } from './lib/store.svelte'
+  import { app, openVault, newNote, newFolder, persist, parent, title, isNote, mod, quit, leave, loadSettings, checkUpdate, ACCENTS, setView } from './lib/store.svelte'
 
   const win = getCurrentWindow()
   let dark = $state(true)
@@ -207,7 +208,7 @@
         <div style:width="{app.sidebarW}px" style:height="100%"><Sidebar /></div>
         <div class="handle" role="separator" aria-orientation="vertical" onpointerdown={(e) => resize(e, 'left')}></div>
       </div>
-      <Editor />
+      {#if app.current && !isNote(app.current)}<FileView />{:else}<Editor />{/if}
       <div class="pane right" class:float={app.agent && !agentDocked} class:shown={app.agent} inert={!app.agent}>
         <div style:width="{app.agentW}px" style:height="100%"><AgentPanel /></div>
         <div class="handle" role="separator" aria-orientation="vertical" onpointerdown={(e) => resize(e, 'right')}></div>

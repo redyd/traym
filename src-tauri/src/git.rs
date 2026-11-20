@@ -48,9 +48,9 @@ async fn conflicts(root: &Path) -> Res<Vec<String>> {
     Ok(git(root, &["diff", "--name-only", "--diff-filter=U"]).await?.lines().map(str::to_string).collect())
 }
 
-/// Only notes and their images are the app's business: other files in the vault are left for the user
-/// to commit (or not). Git pathspecs: `*.md` matches in every folder.
-const SYNCED: [&str; 2] = ["*.md", vault::RESOURCES];
+/// Everything in the vault folder (minus what a .gitignore excludes) is synced: `.` is the vault,
+/// even when it sits inside a bigger repository.
+const SYNCED: &[&str] = &["."];
 
 /// Files under `specs` added, edited, moved or deleted since the last commit, one per line.
 async fn changes(root: &Path, specs: &[&str]) -> Res<String> {
@@ -62,7 +62,7 @@ pub async fn status(root: &Path) -> Res<Option<Status>> {
     if git(root, &["rev-parse", "--is-inside-work-tree"]).await.is_err() {
         return Ok(None);
     }
-    let changes = changes(root, &SYNCED).await?.lines().count();
+    let changes = changes(root, SYNCED).await?.lines().count();
     let remote = match remote(root).await? {
         Some(r) => Some(git(root, &["remote", "get-url", &r]).await?.trim().to_string()),
         None => None,
@@ -97,15 +97,9 @@ pub async fn commit(root: &Path, message: &str) -> Res<()> {
     if !conflicts(root).await?.is_empty() {
         return Err("conflicts need resolving".into());
     }
-    // no change, no add: `add` fails on a pathspec that matches nothing (no note, no `.ressources`)
-    let mut any = false;
-    for spec in SYNCED {
-        if !changes(root, &[spec]).await?.is_empty() {
-            git(root, &["add", "-A", "--", spec]).await?;
-            any = true;
-        }
-    }
-    if any {
+    // no change, no add: `add` fails on a pathspec that matches nothing (an empty vault)
+    if !changes(root, SYNCED).await?.is_empty() {
+        git(root, &[&["add", "-A", "--"], SYNCED].concat()).await?;
         git(root, &["commit", "-m", message]).await?;
     }
     Ok(())
@@ -183,21 +177,24 @@ mod tests {
         assert!(status(root).await.unwrap().is_none());
         init(root).await.unwrap();
         ident(root).await;
-        std::fs::write(root.join("big.rpm"), "x").unwrap(); // not a note: never counted nor committed
-        sync(root, true, "").await.unwrap(); // nothing to commit, even with no note at all
+        sync(root, true, "").await.unwrap(); // nothing to commit, even with no file at all
         std::fs::create_dir(root.join("New folder")).unwrap();
         std::fs::write(root.join("New folder/a.md"), "x").unwrap();
-        assert_eq!(status(root).await.unwrap().unwrap().changes, 1);
+        std::fs::write(root.join("New folder/b"), "x").unwrap(); // any file of the vault: synced
+        std::fs::write(root.join(".env"), "x").unwrap(); // dot files too
+        assert_eq!(status(root).await.unwrap().unwrap().changes, 3);
         sync(root, true, "  ma note  ").await.unwrap();
-        assert_eq!(git(root, &["ls-files"]).await.unwrap(), "New folder/a.md\n");
+        assert_eq!(git(root, &["ls-files"]).await.unwrap(), ".env\nNew folder/a.md\nNew folder/b\n");
         assert_eq!(git(root, &["log", "-1", "--format=%s"]).await.unwrap(), "ma note\n");
         std::fs::create_dir(root.join(vault::RESOURCES)).unwrap();
         std::fs::write(root.join(".ressources/x.png"), "x").unwrap(); // an embedded image: committed alone
         assert_eq!(status(root).await.unwrap().unwrap().changes, 1);
         sync(root, true, "").await.unwrap();
-        assert_eq!(git(root, &["ls-files"]).await.unwrap(), ".ressources/x.png\nNew folder/a.md\n");
+        assert_eq!(git(root, &["ls-files"]).await.unwrap(), ".env\n.ressources/x.png\nNew folder/a.md\nNew folder/b\n");
         std::fs::remove_dir_all(root.join(vault::RESOURCES)).unwrap();
         std::fs::remove_file(root.join("New folder/a.md")).unwrap();
+        std::fs::remove_file(root.join("New folder/b")).unwrap();
+        std::fs::remove_file(root.join(".env")).unwrap();
         sync(root, true, "").await.unwrap(); // a deleted note is committed too
         assert_eq!(git(root, &["ls-files"]).await.unwrap(), "");
         assert_eq!(git(root, &["log", "-1", "--format=%s"]).await.unwrap(), "traym: sync\n");

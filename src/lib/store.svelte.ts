@@ -173,6 +173,28 @@ export function flat(nodes = app.tree): string[] {
   return nodes.flatMap((n) => (n.dir ? flat(n.children) : [n.path]))
 }
 
+export const isNote = (path: string) => path.endsWith('.md')
+export const IMAGES = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif']
+export const isImage = (path: string) => IMAGES.includes(path.split('.').pop()!.toLowerCase())
+/** Files copied or dragged from the system's file manager: WebKitGTK hands them over as file:// URIs, not as files. */
+export function diskPaths(dt: DataTransfer | null) {
+  const uris = (dt?.getData('text/uri-list') || dt?.getData('text/plain') || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+  if (!uris.length || !uris.every((u) => u.startsWith('file://'))) return []
+  return uris.map((u) => decodeURIComponent(new URL(u).pathname))
+}
+
+/** Files copied in the file manager and pasted on the tree: copied into `dir`, which opens to show them. */
+// ponytail: file:// URIs only (Linux); Windows/macOS webviews give File objects, upload their bytes if needed there
+export async function importFiles(dt: DataTransfer | null, dir: string) {
+  const srcs = diskPaths(dt)
+  if (!srcs.length) return
+  const added = await call<string[]>('import_files', { srcs, dir })
+  if (dir) app.open.add(dir)
+  await refresh()
+  added.forEach(pulse)
+  persist()
+}
+
 export const title = (path: string) => path.split('/').pop()!.replace(/\.md$/, '')
 export const parent = (path: string) => path.split('/').slice(0, -1).join('/')
 export const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
